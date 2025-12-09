@@ -1,8 +1,8 @@
 {
   "registers": [
     {
-      "unique_id": "buffer_tank_temperature",
-      "name": "Buffer Tank Temperature",
+      "unique_id": "temperature_top",
+      "name": "temperature_top",
       "register_type": "holding",
       "address": 601,
       "length": 1,
@@ -12,7 +12,7 @@
       "offset": 0.0,
       "precision": 1,
       "device": "buffer_tank",
-      "icon": "mdi:radiator",
+      "icon": "mdi:water-boiler",
       "device_class": "temperature",
       "state_class": "measurement",
       "entity_category": null,
