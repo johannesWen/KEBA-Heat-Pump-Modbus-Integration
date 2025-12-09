@@ -1,0 +1,24 @@
+{
+  "registers": [
+    {
+      "unique_id": "buffer_tank_temperature",
+      "name": "Buffer Tank Temperature",
+      "register_type": "input",
+      "address": 601,
+      "length": 1,
+      "data_type": "int16",
+      "unit_of_measurement": "°C",
+      "scale": 0.1,
+      "offset": 0.0,
+      "precision": 1,
+      "device": "buffer_tank",
+      "icon": "mdi:radiator",
+      "device_class": "temperature",
+      "state_class": "measurement",
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "sensor",
+      "value_map": null
+    }
+  ]
+}
