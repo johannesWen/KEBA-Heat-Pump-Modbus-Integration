@@ -35,15 +35,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up KEBA Modbus from a config entry."""
+    """Set up KEBA Heat Pump Modbus from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
     unit_id = entry.data[CONF_UNIT_ID]
-    scan_interval = entry.options.get(CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
+    scan_interval = entry.options.get(
+        CONF_SCAN_INTERVAL,
+        entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+    )
 
-    registers = _load_registers()
+    # 🔁 Load registers in executor (no blocking I/O in event loop)
+    registers = await _async_load_registers(hass)
 
     client = KebaModbusClient(host, port, unit_id)
 
@@ -63,6 +67,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_REGISTERS: registers,
     }
 
+    # Only sensor platform for now
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
 
     return True
@@ -81,17 +86,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-def _load_registers() -> List[ModbusRegister]:
-    """Load Modbus register descriptions from modbus_registers.json."""
+async def _async_load_registers(hass: HomeAssistant) -> List[ModbusRegister]:
+    """Load Modbus register descriptions from modbus_registers.json in a worker thread."""
     base_path = os.path.dirname(__file__)
     json_path = os.path.join(base_path, "modbus_registers.json")
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    def _load() -> List[ModbusRegister]:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data: Dict[str, Any] = json.load(f)
 
-    registers: List[ModbusRegister] = []
-    for item in data.get("registers", []):
-        registers.append(ModbusRegister(**item))
+        regs: List[ModbusRegister] = []
+        for item in data.get("registers", []):
+            regs.append(ModbusRegister(**item))
 
-    _LOGGER.info("Loaded %s Modbus registers from %s", len(registers), json_path)
-    return registers
+        _LOGGER.info("Loaded %s Modbus registers from %s", len(regs), json_path)
+        return regs
+
+    # Run _load() in executor pool
+    return await hass.async_add_executor_job(_load)
