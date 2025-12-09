@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import logging
+import struct
 from typing import Dict, List
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
-from pymodbus.payload import BinaryPayloadDecoder
-from pymodbus.constants import Endian
 
 from .models import ModbusRegister
 
@@ -74,40 +73,51 @@ class KebaModbusClient:
         if not raw:
             return None
 
-        decoder = BinaryPayloadDecoder.fromRegisters(
-            raw,
-            byteorder=Endian.BIG,
-            wordorder=Endian.BIG,
-        )
+        # --- basic 16-bit decoding helpers ---
+        def to_int16(v: int) -> int:
+            return v - 0x10000 if v & 0x8000 else v
 
         if reg.data_type == "int16":
-            val = decoder.decode_16bit_int()
+            val = to_int16(raw[0])
         elif reg.data_type == "uint16":
-            val = decoder.decode_16bit_uint()
-        elif reg.data_type == "int32":
-            val = decoder.decode_32bit_int()
-        elif reg.data_type == "uint32":
-            val = decoder.decode_32bit_uint()
-        elif reg.data_type == "float32":
-            val = decoder.decode_32bit_float()
+            val = int(raw[0])
+        elif reg.data_type in ("int32", "uint32", "float32"):
+            if len(raw) < 2:
+                # not enough words, fall back to first 16 bits
+                base = raw[0]
+                val = to_int16(base) if reg.data_type == "int32" else int(base)
+            else:
+                # BIG-endian: first word is high, second is low
+                hi, lo = raw[0], raw[1]
+                combined = (hi << 16) | lo
+
+                if reg.data_type == "int32":
+                    # signed 32-bit
+                    val = struct.unpack(">i", combined.to_bytes(4, "big", signed=False))[0]
+                elif reg.data_type == "uint32":
+                    val = combined
+                else:  # float32
+                    val = struct.unpack(">f", combined.to_bytes(4, "big", signed=False))[0]
         else:
-            # fallback: just take first register
+            # Unknown type: just return the first raw register
             val = raw[0]
 
-        # Apply scale and offset
-        try:
-            numeric = (float(val) * reg.scale) + reg.offset
-        except Exception:  # noqa: BLE001
-            numeric = val
+        # Apply scale and offset for numeric values
+        numeric = val
+        if isinstance(val, (int, float)):
+            try:
+                numeric = (float(val) * reg.scale) + reg.offset
+            except Exception:  # noqa: BLE001
+                numeric = val
 
+        # Apply value_map BEFORE precision (value_map uses raw numeric value)
         if reg.value_map is not None:
-            # Value map keys are strings of the raw or scaled value
             key = str(int(val)) if isinstance(val, (int, float)) else str(val)
             mapped = reg.value_map.get(key)
             if mapped is not None:
                 return mapped
 
-        # Apply precision
+        # Precision for floats
         if isinstance(numeric, float) and reg.precision is not None:
             numeric = round(numeric, reg.precision)
 

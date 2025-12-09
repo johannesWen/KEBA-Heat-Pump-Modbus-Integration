@@ -11,5 +11,5 @@
   ],
   "config_flow": true,
   "iot_class": "local_polling",
-  "loggers": ["custom_components.keba_heat_pump"]
+  "loggers": ["custom_components.keba_heat_pump_modbus"]
 }
