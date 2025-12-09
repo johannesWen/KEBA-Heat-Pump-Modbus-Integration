@@ -3,7 +3,7 @@
     {
       "unique_id": "buffer_tank_temperature",
       "name": "Buffer Tank Temperature",
-      "register_type": "input",
+      "register_type": "holding",
       "address": 601,
       "length": 1,
       "data_type": "int16",
