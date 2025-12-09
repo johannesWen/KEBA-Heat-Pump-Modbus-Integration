@@ -49,9 +49,9 @@ class KebaModbusClient:
         for reg in registers:
             try:
                 if reg.register_type == "holding":
-                    resp = client.read_holding_registers(reg.address, reg.length, self._unit_id)
+                    resp = client.read_holding_registers(reg.address, reg.length)
                 else:
-                    resp = client.read_input_registers(reg.address, reg.length, self._unit_id)
+                    resp = client.read_input_registers(reg.address, reg.length)
 
                 if resp.isError():
                     _LOGGER.warning("Error reading register %s (%s): %s", reg.name, reg.address, resp)
