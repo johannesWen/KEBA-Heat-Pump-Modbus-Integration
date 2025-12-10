@@ -85,19 +85,45 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_load_registers(hass: HomeAssistant) -> List[ModbusRegister]:
-    """Load Modbus register descriptions from modbus_registers.json in a worker thread."""
+    """Load Modbus register descriptions from JSON files in a worker thread."""
     base_path = os.path.dirname(__file__)
+    register_dir = os.path.join(base_path, "modbus_registers")
     json_path = os.path.join(base_path, "modbus_registers.json")
 
     def _load() -> List[ModbusRegister]:
-        with open(json_path, "r", encoding="utf-8") as f:
-            data: Dict[str, Any] = json.load(f)
-
         regs: List[ModbusRegister] = []
-        for item in data.get("registers", []):
-            regs.append(ModbusRegister(**item))
 
-        _LOGGER.info("Loaded %s Modbus registers from %s", len(regs), json_path)
+        if os.path.isdir(register_dir):
+            for file_name in sorted(os.listdir(register_dir)):
+                if not file_name.endswith(".json"):
+                    continue
+
+                file_path = os.path.join(register_dir, file_name)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data: Dict[str, Any] = json.load(f)
+
+                for item in data.get("registers", []):
+                    regs.append(ModbusRegister(**item))
+
+                _LOGGER.debug(
+                    "Loaded %s Modbus registers from %s",
+                    len(data.get("registers", [])),
+                    file_path,
+                )
+            _LOGGER.info(
+                "Loaded %s Modbus registers from %s", len(regs), register_dir
+            )
+        else:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data: Dict[str, Any] = json.load(f)
+
+            for item in data.get("registers", []):
+                regs.append(ModbusRegister(**item))
+
+            _LOGGER.info(
+                "Loaded %s Modbus registers from %s", len(regs), json_path
+            )
+
         return regs
 
     # Run _load() in executor pool
