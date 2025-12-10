@@ -1,3 +1,6 @@
+from homeassistant.const import Platform
+
+
 DOMAIN = "keba_heat_pump_modbus"
 
 CONF_HOST = "host"
@@ -13,7 +16,7 @@ DATA_COORDINATOR = "coordinator"
 DATA_REGISTERS = "registers"
 DATA_CLIENT = "client"
 
-PLATFORMS = ["sensor"]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 DEVICE_NAME_MAP = {
     "heat_pump": "Heat Pump",
