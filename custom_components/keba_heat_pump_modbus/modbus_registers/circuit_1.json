@@ -1,7 +1,7 @@
 {
   "registers": [
     {
-      "unique_id": "circuit_flow_temperature",
+      "unique_id": "circuit_flow_temperature_circuit_1",
       "name": "Circuit Flow Temperature",
       "register_type": "holding",
       "address": 15,
@@ -21,7 +21,7 @@
       "value_map": null
     },
     {
-      "unique_id": "circuit_reflux_temperature",
+      "unique_id": "circuit_reflux_temperature_circuit_1",
       "name": "Circuit Reflux Temperature",
       "register_type": "holding",
       "address": 16,
@@ -38,6 +38,22 @@
       "entity_category": null,
       "enabled_default": true,
       "entity_platform": "sensor",
+      "value_map": null
+    },
+    {
+      "unique_id": "heat_request_circuit_1",
+      "name": "Heat Request",
+      "register_type": "holding",
+      "address": 19,
+      "length": 1,
+      "data_type": "boolean",
+      "device": "circuit_1",
+      "icon": "mdi:fire",
+      "device_class": "boolean",
+      "state_class": "measurement",
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "binary_sensor",
       "value_map": null
     }
   ]

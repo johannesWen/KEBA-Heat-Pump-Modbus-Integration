@@ -1,3 +1,60 @@
 {
-  "registers": []
+  "registers": [
+    {
+      "unique_id": "circuit_flow_temperature_circuit_2",
+      "name": "Circuit Flow Temperature",
+      "register_type": "holding",
+      "address": 65,
+      "length": 1,
+      "data_type": "int16",
+      "unit_of_measurement": "°C",
+      "scale": 0.1,
+      "offset": 0.0,
+      "precision": 1,
+      "device": "circuit_2",
+      "icon": "mdi:thermometer",
+      "device_class": "temperature",
+      "state_class": "measurement",
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "sensor",
+      "value_map": null
+    },
+    {
+      "unique_id": "circuit_reflux_temperature_circuit_2",
+      "name": "Circuit Reflux Temperature",
+      "register_type": "holding",
+      "address": 66,
+      "length": 1,
+      "data_type": "int16",
+      "unit_of_measurement": "°C",
+      "scale": 0.1,
+      "offset": 0.0,
+      "precision": 1,
+      "device": "circuit_2",
+      "icon": "mdi:thermometer",
+      "device_class": "temperature",
+      "state_class": "measurement",
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "sensor",
+      "value_map": null
+    },
+    {
+      "unique_id": "heat_request_circuit_2",
+      "name": "Heat Request",
+      "register_type": "holding",
+      "address": 69,
+      "length": 1,
+      "data_type": "boolean",
+      "device": "circuit_2",
+      "icon": "mdi:fire",
+      "device_class": "boolean",
+      "state_class": "measurement",
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "binary_sensor",
+      "value_map": null
+    }
+  ]
 }
