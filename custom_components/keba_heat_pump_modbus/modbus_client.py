@@ -44,7 +44,9 @@ class KebaModbusClient:
     # ---------------------------------------------------------------------
     #  Helper that hides all the pymodbus version differences
     # ---------------------------------------------------------------------
-    def _read_register_list(self, client: ModbusTcpClient, reg: ModbusRegister) -> list[int] | None:
+    def _read_register_list(
+        self, client: ModbusTcpClient, reg: ModbusRegister
+    ) -> list[int] | None:
         """
         Return a list of raw 16-bit register values for one ModbusRegister.
 
@@ -116,7 +118,9 @@ class KebaModbusClient:
     # ---------------------------------------------------------------------
     #  Main public method used by the coordinator
     # ---------------------------------------------------------------------
-    def read_all(self, registers: List[ModbusRegister]) -> Dict[str, float | int | str | bool | None]:
+    def read_all(
+        self, registers: List[ModbusRegister]
+    ) -> Dict[str, float | int | str | bool | None]:
         """Read all configured registers and return a dict of unique_id -> value."""
         client = self._ensure_client()
         result: Dict[str, float | int | str | bool | None] = {}
@@ -145,7 +149,9 @@ class KebaModbusClient:
     #  Decoding
     # ---------------------------------------------------------------------
     @staticmethod
-    def _decode_registers(raw: list[int], reg: ModbusRegister) -> float | int | str | bool | None:
+    def _decode_registers(
+        raw: list[int], reg: ModbusRegister
+    ) -> float | int | str | bool | None:
         """Decode according to data_type, then apply scale/offset and value_map."""
         if not raw:
             return None
@@ -167,11 +173,17 @@ class KebaModbusClient:
                 combined = (hi << 16) | lo
 
                 if reg.data_type == "int32":
-                    val = struct.unpack(">i", combined.to_bytes(4, "big", signed=False))[0]
+                    val = struct.unpack(
+                        ">i", combined.to_bytes(4, "big", signed=False)
+                    )[0]
                 elif reg.data_type == "uint32":
                     val = combined
                 else:  # float32
-                    val = struct.unpack(">f", combined.to_bytes(4, "big", signed=False))[0]
+                    val = struct.unpack(
+                        ">f", combined.to_bytes(4, "big", signed=False)
+                    )[0]
+        elif reg.data_type == "boolean":
+            val = bool(raw[0])
         else:
             # Unknown type: just return the first raw register
             val = raw[0]

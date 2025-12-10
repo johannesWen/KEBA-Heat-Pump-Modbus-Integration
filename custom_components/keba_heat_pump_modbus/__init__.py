@@ -6,25 +6,25 @@ import os
 from typing import Any, Dict, List
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.const import Platform
 
 from .const import (
-    DOMAIN,
     CONF_HOST,
     CONF_PORT,
-    CONF_UNIT_ID,
     CONF_SCAN_INTERVAL,
-    DEFAULT_SCAN_INTERVAL,
+    CONF_UNIT_ID,
+    DATA_CLIENT,
     DATA_COORDINATOR,
     DATA_REGISTERS,
-    DATA_CLIENT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
     PLATFORMS,
 )
-from .models import ModbusRegister
-from .modbus_client import KebaModbusClient
 from .coordinator import KebaCoordinator
+from .modbus_client import KebaModbusClient
+from .models import ModbusRegister
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,7 +75,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR])
+    unload_ok = await hass.config_entries.async_unload_platforms(
+        entry, [Platform.SENSOR]
+    )
 
     data = hass.data[DOMAIN].pop(entry.entry_id, None)
     if data is not None:

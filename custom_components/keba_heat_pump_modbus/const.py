@@ -14,3 +14,12 @@ DATA_REGISTERS = "registers"
 DATA_CLIENT = "client"
 
 PLATFORMS = ["sensor"]
+
+DEVICE_NAME_MAP = {
+    "heat_pump": "Heat Pump",
+    "dhw_tank": "Hot Water Tank",
+    "buffer_tank1": "Buffer Tank",
+    "circuit_1": "Heating Circuit 1",
+    "circuit_2": "Heating Circuit 2",
+    "circuit_3": "Heating Circuit 3",
+}

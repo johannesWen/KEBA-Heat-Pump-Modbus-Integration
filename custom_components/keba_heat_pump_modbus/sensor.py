@@ -9,7 +9,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, DATA_COORDINATOR, DATA_REGISTERS
+from .const import DOMAIN, DATA_COORDINATOR, DATA_REGISTERS, DEVICE_NAME_MAP
 from .models import ModbusRegister
 from .coordinator import KebaCoordinator
 
@@ -35,22 +35,14 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-DEVICE_NAME_MAP = {
-    "heat_pump": "Heat Pump",
-    "dhw_tank": "Hot Water Tank",
-    "buffer_tank": "Buffer Tank",
-    "circuit_1": "Heating Circuit 1",
-    "circuit_2": "Heating Circuit 2",
-    # extend to match devices you define in JSON
-}
-
-
 class KebaSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
     """Sensor for a single KEBA Modbus datapoint."""
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: KebaCoordinator, entry: ConfigEntry, reg: ModbusRegister) -> None:
+    def __init__(
+        self, coordinator: KebaCoordinator, entry: ConfigEntry, reg: ModbusRegister
+    ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._reg = reg
@@ -69,7 +61,9 @@ class KebaSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
     @property
     def device_info(self) -> Dict[str, Any]:
         device_key = self._reg.device or "heat_pump"
-        device_name = DEVICE_NAME_MAP.get(device_key, device_key.replace("_", " ").title())
+        device_name = DEVICE_NAME_MAP.get(
+            device_key, device_key.replace("_", " ").title()
+        )
 
         return {
             "identifiers": {(DOMAIN, f"{self._entry.entry_id}_{device_key}")},
