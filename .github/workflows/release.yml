@@ -12,6 +12,8 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    needs:
+      - validation
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

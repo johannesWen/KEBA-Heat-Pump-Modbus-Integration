@@ -15,7 +15,6 @@ on:
       - v*
 
 jobs:
-
   validation:
     name: HACS Validation
     runs-on: ubuntu-latest
