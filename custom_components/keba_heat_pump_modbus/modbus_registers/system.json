@@ -1,0 +1,24 @@
+{
+  "registers": [
+    {
+      "unique_id": "exterior_temperature",
+      "name": "Exterior Temperature",
+      "register_type": "holding",
+      "address": 1502,
+      "length": 1,
+      "data_type": "int16",
+      "unit_of_measurement": "°C",
+      "scale": 0.1,
+      "offset": 0.0,
+      "precision": 1,
+      "device": "system",
+      "icon": "mdi:sun-thermometer",
+      "device_class": "temperature",
+      "state_class": "measurement",
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "sensor",
+      "value_map": null
+    }
+  ]
+}

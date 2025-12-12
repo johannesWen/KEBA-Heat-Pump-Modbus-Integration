@@ -19,10 +19,12 @@ DATA_CLIENT = "client"
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 DEVICE_NAME_MAP = {
+    "system": "System",
     "heat_pump": "Heat Pump",
     "dhw_tank": "Hot Water Tank",
     "buffer_tank1": "Buffer Tank",
     "circuit_1": "Heating Circuit 1",
     "circuit_2": "Heating Circuit 2",
     "circuit_3": "Heating Circuit 3",
+    "circuit_4": "Heating Circuit 4",
 }
