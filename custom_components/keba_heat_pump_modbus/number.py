@@ -9,7 +9,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_CLIENT, DATA_COORDINATOR, DATA_REGISTERS, DEVICE_NAME_MAP, DOMAIN
+from .const import (
+    DATA_CLIENT,
+    DATA_COORDINATOR,
+    DATA_REGISTERS,
+    DEVICE_NAME_MAP,
+    DOMAIN,
+)
 from .coordinator import KebaCoordinator
 from .modbus_client import KebaModbusClient
 from .models import ModbusRegister
@@ -62,7 +68,7 @@ class KebaControl(CoordinatorEntity[KebaCoordinator], NumberEntity):
         self._attr_device_class = reg.device_class
         self._attr_entity_category = reg.entity_category
         self._attr_entity_registry_enabled_default = reg.enabled_default
-        self._attr_native_step = reg.scale if reg.scale not in (0, 1) else None
+        self._attr_native_step = reg.native_step if reg.native_step else 0.1
         self._attr_native_min_value = reg.native_min_value
         self._attr_native_max_value = reg.native_max_value
 
@@ -88,5 +94,7 @@ class KebaControl(CoordinatorEntity[KebaCoordinator], NumberEntity):
         return self.coordinator.data.get(self._reg.unique_id)
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.hass.async_add_executor_job(self._client.write_register, self._reg, value)
+        await self.hass.async_add_executor_job(
+            self._client.write_register, self._reg, value
+        )
         await self.coordinator.async_request_refresh()

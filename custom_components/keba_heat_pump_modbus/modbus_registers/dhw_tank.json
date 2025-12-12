@@ -40,7 +40,8 @@
       "entity_platform": "controls",
       "value_map": null,
       "native_min_value": 0,
-      "native_max_value": 55
+      "native_max_value": 55,
+      "native_step": 0.5
     },
     {
       "unique_id": "operating_mode_dhw_tank1",

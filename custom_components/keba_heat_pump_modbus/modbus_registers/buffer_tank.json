@@ -60,7 +60,8 @@
       "entity_platform": "controls",
       "value_map": null,
       "native_min_value": 0,
-      "native_max_value": 90
+      "native_max_value": 90,
+      "native_step": 0.5
     },
     {
       "unique_id": "heat_request_buffer_tank1",
