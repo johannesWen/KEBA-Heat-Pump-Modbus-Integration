@@ -6,7 +6,8 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+  pull-requests: write
 
 jobs:
   validation:
