@@ -5,7 +5,7 @@
   "documentation": "https://example.com/your-repo-or-docs",
   "issue_tracker": "https://example.com/your-issues",
   "dependencies": [],
-  "codeowners": ["@your-github-handle"],
+  "codeowners": ["@johannesWen"],
   "requirements": [
     "pymodbus>=3.6.0"
   ],
