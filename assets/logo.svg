@@ -1,0 +1,21 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title>KEBA Heat Pump Modbus Integration</title>
+  <desc>Minimal logo combining heat pump coils and Modbus link indicator.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d47a1"/>
+      <stop offset="100%" stop-color="#1976d2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="64" fill="url(#bg)"/>
+  <circle cx="256" cy="238" r="180" fill="none" stroke="#ffc107" stroke-width="22"/>
+  <circle cx="256" cy="238" r="120" fill="none" stroke="#e0f2f1" stroke-width="16"/>
+  <g fill="none" stroke-linecap="round">
+    <line x1="96" y1="148" x2="336" y2="148" stroke="#e0f2f1" stroke-width="22"/>
+    <line x1="96" y1="208" x2="336" y2="208" stroke="#ffc107" stroke-width="22"/>
+    <line x1="96" y1="268" x2="336" y2="268" stroke="#e0f2f1" stroke-width="22"/>
+    <line x1="96" y1="328" x2="336" y2="328" stroke="#ffc107" stroke-width="22"/>
+  </g>
+  <rect x="156" y="366" width="200" height="96" rx="24" fill="#e0f2f1"/>
+  <text x="256" y="430" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="700" fill="#0d47a1">KEBA</text>
+</svg>

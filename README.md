@@ -1,15 +1,47 @@
-⚠️ Under development
+# KEBA Heat Pump Modbus Integration
 
-# KEBA-Heat-Pump-Modbus-Integration
-A Home Assistant integration to interact with a KEBA heat pump controller over modbus.
+![KEBA Heat Pump Modbus logo](assets/logo.svg)
 
-## Hacs installation
-1. Install hacs to your homeassistant installation. See https://hacs.xyz/docs/use/download/download/
-2. Add this repository to hacs: https://github.com/johannesWen/KEBA-Heat-Pump-Modbus-Integration
-3. Install the KEBA-Heat-Pump-Modbus integration in HACS 
-4. Restart Home-Assistant
-5. Go to Configuration -> Integrations and search for "KEBA Heat Pump Modbus"
-6. Add the Integration and fill out all required fields
-7. Restart Home-Assistant
+A custom Home Assistant integration that polls a KEBA heat pump controller over Modbus TCP and exposes operational data as Home Assistant entities. Use it to keep an eye on temperatures, operating states, and circuit health directly from your dashboard.
 
+## What the integration does
 
+- Connects to a KEBA heat pump via Modbus TCP using the host, port, and unit ID you configure.
+- Polls defined Modbus registers on a configurable interval to keep data fresh.
+- Provides sensors and binary sensors for heat pump components (system, hot water tank, buffer tank, and up to four heating circuits) with manufacturer, model, and device grouping.
+- Ships with an options flow so you can adjust the scan interval from the Home Assistant UI after setup.
+
+## Requirements
+
+- Home Assistant with HACS installed.
+- Network access from Home Assistant to the KEBA heat pump Modbus interface (default TCP port 502).
+- Modbus unit ID for the controller (defaults to `1`).
+
+## HACS Installation
+
+1. Open **HACS → Integrations** in Home Assistant and select **Custom repositories**.
+2. Add `https://github.com/johannesWen/KEBA-Heat-Pump-Modbus-Integration` as a repository of type **Integration**.
+3. Search for **KEBA Heat Pump Modbus** in HACS and install it.
+4. Restart Home Assistant after installation completes.
+5. Go to **Settings → Devices & Services → Add Integration** and search for **KEBA Heat Pump Modbus**.
+6. Enter the heat pump **Host**, optional **Port** (defaults to `502`), **Unit ID** (defaults to `1`), and choose your **Scan interval**.
+7. Finish setup. You can revisit the integration options later to change the scan interval without re-adding the device.
+
+## Manual Installation (alternative)
+
+1. Copy the `custom_components/keba_heat_pump_modbus` directory into your Home Assistant `custom_components` folder.
+2. Restart Home Assistant.
+3. Add the integration via **Settings → Devices & Services → Add Integration** and provide the connection details when prompted.
+
+## Configuration options
+
+- **Host**: IP address or hostname of the KEBA heat pump controller.
+- **Port**: Modbus TCP port (defaults to `502`).
+- **Unit ID**: Modbus unit/slave ID (defaults to `1`).
+- **Scan interval**: How often (in seconds) the integration polls registers; configurable during setup and via options.
+
+## Troubleshooting
+
+- Ensure the KEBA controller allows Modbus TCP connections from your Home Assistant host.
+- Verify that the configured unit ID and port match the controller settings.
+- Increase the scan interval if you experience timeouts or if the controller limits request frequency.
