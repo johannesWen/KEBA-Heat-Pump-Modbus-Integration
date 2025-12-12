@@ -21,19 +21,15 @@ jobs:
 
       - name: Create Home Assistant release archive
         run: |
-          mkdir -p dist
-          zip -r "dist/keba-heat-pump-modbus-${RELEASE_VERSION}.zip" \
-            custom_components \
-            hacs.json \
-            LICENSE \
-            README.md
+          cd ${{ github.workspace }}/custom_components/keba_heat_pump_modbus
+          zip -r ${{ github.workspace }}/keba-heat-pump-modbus.zip ./
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_VERSION }}
-          name: Release ${{ env.RELEASE_VERSION }}
+          name: ${{ env.RELEASE_VERSION }}
           files: |
-            dist/keba-heat-pump-modbus-${{ env.RELEASE_VERSION }}.zip
+           ${{ github.workspace }}/keba-heat-pump-modbus.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

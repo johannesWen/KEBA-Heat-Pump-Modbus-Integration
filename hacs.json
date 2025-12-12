@@ -3,5 +3,6 @@
   "content_in_root": false,
   "render_readme": true,
   "domains": ["keba_heat_pump_modbus"],
-  "zip_release": true
+  "zip_release": true,
+  "filename": "keba-heat-pump-modbus.zip"
 }
