@@ -145,6 +145,33 @@ class KebaModbusClient:
 
         return result
 
+    def write_register(self, reg: ModbusRegister, value: float | int | bool) -> None:
+        """Write a single holding register based on the ModbusRegister metadata."""
+
+        if reg.register_type != "holding":
+            raise ModbusException("Only holding registers can be written")
+
+        if reg.length != 1:
+            raise ModbusException("Writing multi-register values is not supported yet")
+
+        client = self._ensure_client()
+
+        if isinstance(value, (int, float)):
+            try:
+                scaled_value = (float(value) - reg.offset) / reg.scale
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error("Failed to scale value %s for %s: %s", value, reg.name, err)
+                raise
+            raw_value = int(round(scaled_value))
+        elif isinstance(value, bool):
+            raw_value = int(value)
+        else:
+            raise ModbusException("Unsupported value type for writing")
+
+        resp = client.write_register(reg.address, raw_value)
+        if hasattr(resp, "isError") and resp.isError():
+            raise ModbusException(f"Error writing register {reg.name} ({reg.address}): {resp}")
+
     # ---------------------------------------------------------------------
     #  Decoding
     # ---------------------------------------------------------------------

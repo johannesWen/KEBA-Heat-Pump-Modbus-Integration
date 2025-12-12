@@ -57,7 +57,7 @@
       "state_class": "measurement",
       "entity_category": null,
       "enabled_default": true,
-      "entity_platform": "sensor",
+      "entity_platform": "controls",
       "value_map": null
     },
     {
