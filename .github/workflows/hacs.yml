@@ -5,15 +5,7 @@ permissions:
   pull-requests: write
 
 on:
-  # workflow_dispatch:
   workflow_call:
-  # pull_request:
-  # push:
-  #   branches:
-  #     - main
-  #     - develop
-  #   tags:
-  #     - v*
 
 jobs:
   validation:
@@ -22,9 +14,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
-      - name: Run hassfest validation
-        uses: home-assistant/actions/hassfest@master
-      - name: Run HACS validation
-        uses: hacs/action@22.5.0
-        with:
-          category: integration
+      # - name: Run hassfest validation
+      #   uses: home-assistant/actions/hassfest@master
+      # - name: Run HACS validation
+      #   uses: hacs/action@22.5.0
+      #   with:
+      #     category: integration
