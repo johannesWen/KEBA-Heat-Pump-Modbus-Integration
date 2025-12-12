@@ -57,8 +57,10 @@
       "state_class": "measurement",
       "entity_category": null,
       "enabled_default": true,
-      "entity_platform": "sensor",
-      "value_map": null
+      "entity_platform": "controls",
+      "value_map": null,
+      "native_min_value": 0,
+      "native_max_value": 90
     },
     {
       "unique_id": "heat_request_buffer_tank1",

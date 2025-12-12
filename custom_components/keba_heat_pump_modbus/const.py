@@ -16,7 +16,7 @@ DATA_COORDINATOR = "coordinator"
 DATA_REGISTERS = "registers"
 DATA_CLIENT = "client"
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.NUMBER]
 
 DEVICE_NAME_MAP = {
     "system": "System",

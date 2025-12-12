@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 
 RegisterType = Literal["holding", "input"]
-EntityPlatform = Literal["sensor", "binary_sensor"]
+EntityPlatform = Literal["sensor", "binary_sensor", "controls"]
 
 
 @dataclass
@@ -29,3 +29,5 @@ class ModbusRegister:
     entity_platform: EntityPlatform = "sensor"  # sensor / binary_sensor
     # Optional mapping for enumerations or binary values:
     value_map: dict[str, Any] | None = None  # map raw values -> state (as string/bool/etc.)
+    native_min_value: float | int | None = None
+    native_max_value: float | int | None = None
