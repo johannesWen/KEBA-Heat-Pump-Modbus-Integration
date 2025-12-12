@@ -1,7 +1,7 @@
 {
   "domain": "keba_heat_pump_modbus",
   "name": "KEBA Heat Pump Modbus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "documentation": "https://example.com/your-repo-or-docs",
   "issue_tracker": "https://example.com/your-issues",
   "dependencies": [],
