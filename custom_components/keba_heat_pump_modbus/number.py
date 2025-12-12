@@ -63,6 +63,8 @@ class KebaControl(CoordinatorEntity[KebaCoordinator], NumberEntity):
         self._attr_entity_category = reg.entity_category
         self._attr_entity_registry_enabled_default = reg.enabled_default
         self._attr_native_step = reg.scale if reg.scale not in (0, 1) else None
+        self._attr_native_min_value = reg.native_min_value
+        self._attr_native_max_value = reg.native_max_value
 
     @property
     def device_info(self) -> Dict[str, Any]:

@@ -58,7 +58,9 @@
       "entity_category": null,
       "enabled_default": true,
       "entity_platform": "controls",
-      "value_map": null
+      "value_map": null,
+      "native_min_value": 0,
+      "native_max_value": 100
     },
     {
       "unique_id": "heat_request_buffer_tank1",
