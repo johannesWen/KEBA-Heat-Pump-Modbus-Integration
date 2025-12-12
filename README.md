@@ -1,6 +1,8 @@
-# KEBA Heat Pump Modbus Integration
+<p align="center">
+    <img src="https://github.com/johannesWen/KEBA-Heat-Pump-Modbus-Integration/blob/main/assets/logo.png" height="150" alt="KEBA-Heat-Pump-Modbus-Integration logo">
+</p>
 
-![KEBA Heat Pump Modbus logo](assets/logo.svg)
+# KEBA Heat Pump Modbus Integration
 
 A custom Home Assistant integration that polls a KEBA heat pump controller over Modbus TCP and exposes operational data as Home Assistant entities. Use it to keep an eye on temperatures, operating states, and circuit health directly from your dashboard.
 
