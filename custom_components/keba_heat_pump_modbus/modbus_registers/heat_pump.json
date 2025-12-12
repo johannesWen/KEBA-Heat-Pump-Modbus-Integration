@@ -188,7 +188,7 @@
       "length": 1,
       "data_type": "int16",
       "unit_of_measurement": "%",
-      "scale": 0.01,
+      "scale": 1.0,
       "offset": 0.0,
       "precision": 1,
       "device": "heat_pump",
