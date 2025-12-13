@@ -122,7 +122,7 @@
       "state_class": null,
       "entity_category": null,
       "enabled_default": true,
-      "entity_platform": "sensor",
+      "entity_platform": "select",
       "value_map": {
         "0": "Standby",
         "1": "Timer",
