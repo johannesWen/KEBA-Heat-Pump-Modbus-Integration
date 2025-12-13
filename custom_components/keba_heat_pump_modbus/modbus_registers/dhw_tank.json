@@ -57,7 +57,7 @@
       "state_class": null,
       "entity_category": null,
       "enabled_default": true,
-      "entity_platform": "controls",
+      "entity_platform": "select",
       "value_map": {
         "0": "Off",
         "1": "Automatic",

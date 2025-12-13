@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 
 RegisterType = Literal["holding", "input"]
-EntityPlatform = Literal["sensor", "binary_sensor", "controls"]
+EntityPlatform = Literal["sensor", "binary_sensor", "controls", "select"]
 
 
 @dataclass
