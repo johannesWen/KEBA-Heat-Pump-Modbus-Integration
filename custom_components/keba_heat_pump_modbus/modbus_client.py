@@ -160,7 +160,9 @@ class KebaModbusClient:
             try:
                 scaled_value = (float(value) - reg.offset) / reg.scale
             except Exception as err:  # noqa: BLE001
-                _LOGGER.error("Failed to scale value %s for %s: %s", value, reg.name, err)
+                _LOGGER.error(
+                    "Failed to scale value %s for %s: %s", value, reg.name, err
+                )
                 raise
             raw_value = int(round(scaled_value))
         elif isinstance(value, bool):
@@ -168,9 +170,22 @@ class KebaModbusClient:
         else:
             raise ModbusException("Unsupported value type for writing")
 
+        if reg.data_type == "int16":
+            if raw_value < -0x8000 or raw_value > 0x7FFF:
+                raise ModbusException(
+                    f"Value {raw_value} out of range for signed 16-bit register {reg.name}"
+                )
+            raw_value &= 0xFFFF
+        elif raw_value < 0 or raw_value > 0xFFFF:
+            raise ModbusException(
+                f"Value {raw_value} out of range for 16-bit register {reg.name}"
+            )
+
         resp = client.write_register(reg.address, raw_value)
         if hasattr(resp, "isError") and resp.isError():
-            raise ModbusException(f"Error writing register {reg.name} ({reg.address}): {resp}")
+            raise ModbusException(
+                f"Error writing register {reg.name} ({reg.address}): {resp}"
+            )
 
     # ---------------------------------------------------------------------
     #  Decoding
