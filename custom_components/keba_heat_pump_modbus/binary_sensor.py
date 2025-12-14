@@ -48,7 +48,6 @@ class KebaBinarySensor(CoordinatorEntity[KebaCoordinator], BinarySensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{reg.unique_id}"
         self._attr_name = reg.name
 
-        self._attr_icon = reg.icon
         self._attr_device_class = reg.device_class
         self._attr_entity_category = reg.entity_category
         self._attr_entity_registry_enabled_default = reg.enabled_default
@@ -74,3 +73,12 @@ class KebaBinarySensor(CoordinatorEntity[KebaCoordinator], BinarySensorEntity):
             return None
         value = self.coordinator.data.get(self._reg.unique_id)
         return bool(value) if value is not None else None
+
+    @property
+    def icon(self) -> str | None:
+        state = self.is_on
+        if state is True and self._reg.icon_on:
+            return self._reg.icon_on
+        if state is False and self._reg.icon_off:
+            return self._reg.icon_off
+        return self._reg.icon
