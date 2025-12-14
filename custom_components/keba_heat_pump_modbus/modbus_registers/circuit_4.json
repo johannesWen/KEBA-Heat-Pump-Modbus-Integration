@@ -286,6 +286,8 @@
       "data_type": "int16",
       "device": "circuit_4",
       "icon": "mdi:pump",
+      "icon_on": "mdi:pump",
+      "icon_off": "mdi:pump-off",
       "device_class": null,
       "state_class": null,
       "entity_category": null,

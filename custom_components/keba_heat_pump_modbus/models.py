@@ -22,6 +22,8 @@ class ModbusRegister:
     precision: int | None = None
     device: str = "heat_pump"  # logical device group (heat_pump, dhw_tank, buffer_tank, circuit_1, ...)
     icon: str | None = None
+    icon_on: str | None = None
+    icon_off: str | None = None
     device_class: str | None = None
     state_class: str | None = None
     entity_category: str | None = None  # "diagnostic", "config", etc.

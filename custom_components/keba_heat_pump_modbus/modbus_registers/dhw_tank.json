@@ -74,6 +74,8 @@
       "data_type": "boolean",
       "device": "dhw_tank",
       "icon": "mdi:fire",
+      "icon_on": "mdi:fire",
+      "icon_off": "mdi:fire-off",
       "device_class": "boolean",
       "state_class": "measurement",
       "entity_category": null,
