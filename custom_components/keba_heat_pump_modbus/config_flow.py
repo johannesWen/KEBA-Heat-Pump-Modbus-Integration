@@ -13,9 +13,11 @@ from .const import (
     CONF_PORT,
     CONF_UNIT_ID,
     CONF_SCAN_INTERVAL,
+    CONF_CIRCUITS,
     DEFAULT_PORT,
     DEFAULT_UNIT_ID,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_CIRCUITS,
 )
 
 
@@ -50,6 +52,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
                 ): int,
+                vol.Required(
+                    CONF_CIRCUITS, default=DEFAULT_CIRCUITS
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
             }
         )
 
@@ -99,12 +104,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
             ),
         )
+        current_circuits = self._entry.options.get(
+            CONF_CIRCUITS,
+            self._entry.data.get(
+                CONF_CIRCUITS,
+                DEFAULT_CIRCUITS,
+            ),
+        )
 
         data_schema = vol.Schema(
             {
                 vol.Required(
                     CONF_SCAN_INTERVAL, default=current_scan
                 ): int,
+                vol.Required(
+                    CONF_CIRCUITS, default=current_circuits
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
             }
         )
 

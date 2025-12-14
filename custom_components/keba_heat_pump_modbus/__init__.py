@@ -14,9 +14,11 @@ from .const import (
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     CONF_UNIT_ID,
+    CONF_CIRCUITS,
     DATA_CLIENT,
     DATA_COORDINATOR,
     DATA_REGISTERS,
+    DEFAULT_CIRCUITS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
@@ -44,9 +46,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_SCAN_INTERVAL,
         entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
     )
+    num_circuits = entry.options.get(
+        CONF_CIRCUITS,
+        entry.data.get(CONF_CIRCUITS, DEFAULT_CIRCUITS),
+    )
 
     # 🔁 Load registers in executor (no blocking I/O in event loop)
     registers = await _async_load_registers(hass)
+
+    _apply_circuit_enablement(registers, num_circuits)
 
     client = KebaModbusClient(host, port, unit_id)
 
@@ -128,3 +136,19 @@ async def _async_load_registers(hass: HomeAssistant) -> List[ModbusRegister]:
 
     # Run _load() in executor pool
     return await hass.async_add_executor_job(_load)
+
+
+def _apply_circuit_enablement(registers: List[ModbusRegister], num_circuits: int) -> None:
+    """Enable or disable circuit registers based on configured count."""
+
+    for reg in registers:
+        device_key = reg.device or ""
+        if not device_key.startswith("circuit_"):
+            continue
+
+        try:
+            circuit_index = int(device_key.split("_")[1])
+        except (IndexError, ValueError):
+            continue
+
+        reg.enabled_default = circuit_index <= num_circuits
