@@ -7,7 +7,7 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_UNIT_ID = "unit_id"
 CONF_SCAN_INTERVAL = "scan_interval"
-CONF_CIRCUITS = "circuits_installed"
+CONF_CIRCUITS = "heat_circuits_used"
 
 DEFAULT_PORT = 502
 DEFAULT_UNIT_ID = 1
