@@ -54,7 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # 🔁 Load registers in executor (no blocking I/O in event loop)
     registers = await _async_load_registers(hass)
 
-    _apply_circuit_enablement(registers, num_circuits)
+    registers = _filter_circuit_registers(registers, num_circuits)
 
     client = KebaModbusClient(host, port, unit_id)
 
@@ -138,17 +138,38 @@ async def _async_load_registers(hass: HomeAssistant) -> List[ModbusRegister]:
     return await hass.async_add_executor_job(_load)
 
 
-def _apply_circuit_enablement(registers: List[ModbusRegister], num_circuits: int) -> None:
-    """Enable or disable circuit registers based on configured count."""
+def _filter_circuit_registers(
+    registers: List[ModbusRegister], num_circuits: int
+) -> List[ModbusRegister]:
+    """Return registers for installed circuits only.
+
+    Registers belonging to circuits above ``num_circuits`` are filtered out so
+    the corresponding device (and its entities) are not created at all.
+    """
+
+    filtered: List[ModbusRegister] = []
 
     for reg in registers:
         device_key = reg.device or ""
-        if not device_key.startswith("circuit_"):
-            continue
 
-        try:
-            circuit_index = int(device_key.split("_")[1])
-        except (IndexError, ValueError):
-            continue
+        if device_key.startswith("circuit_"):
+            try:
+                circuit_index = int(device_key.split("_")[1])
+            except (IndexError, ValueError):
+                _LOGGER.debug(
+                    "Skipping circuit register with unexpected device key: %s",
+                    device_key,
+                )
+                continue
 
-        reg.enabled_default = circuit_index <= num_circuits
+            if circuit_index > num_circuits:
+                _LOGGER.debug(
+                    "Filtering out register %s for non-installed circuit %s",
+                    reg.unique_id,
+                    circuit_index,
+                )
+                continue
+
+        filtered.append(reg)
+
+    return filtered
