@@ -39,7 +39,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
             cd custom_components/keba_heat_pump_modbus
-            zip -r ${{ github.workspace }}/kea-heat-pump-modbus.zip ./  
+            zip -r ${{ github.workspace }}/keba_heat_pump_modbus.zip ./  
 
       - name: Upload release asset
         if: github.event_name == 'push'
