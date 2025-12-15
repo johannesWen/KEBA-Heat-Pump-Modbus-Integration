@@ -1,7 +1,7 @@
 {
   "name": "KEBA Heat Pump Modbus",
   "content_in_root": false,
-  "filename": "keba-heat-pump-modbus.zip",
+  "filename": "keba_heat_pump_modbus.zip",
   "render_readme": true,
   "zip_release": true
 }
