@@ -28,16 +28,26 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      # (Optional) GitHub Enterprise requires GHE_HOST variable set
-      #- name: Set GHE_HOST
-      #  run: |
-      #    echo "GHE_HOST=${GITHUB_SERVER_URL##https:\/\/}" >> $GITHUB_ENV
-
-      # Drafts your next Release notes as Pull Requests are merged into "master"
-      - uses: release-drafter/release-drafter@v6
-        # (Optional) specify config name to use, relative to .github/. Default: release-drafter.yml
-        # with:
-        #   config-name: my-config.yml
-        #   disable-autolabeler: true
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - id: release_drafter
+        uses: release-drafter/release-drafter@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Home Assistant release archive
+        if: github.event_name == 'push'
+        run: |
+            cd custom_components/keba_heat_pump_modbus
+            zip -r ${{ github.workspace }}/kea-heat-pump-modbus.zip ./  
+
+      - name: Upload release asset
+        if: github.event_name == 'push'
+        uses: actions/upload-release-asset@v1
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+            upload_url: ${{ steps.release_drafter.outputs.upload_url }}
+            asset_path: ${{ github.workspace }}/keba_heat_pump_modbus.zip
+            asset_name: keba_heat_pump_modbus.zip
+            asset_content_type: application/zip
