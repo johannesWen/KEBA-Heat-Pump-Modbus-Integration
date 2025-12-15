@@ -38,6 +38,44 @@ def _create_homeassistant_stub() -> None:
 
     ha = types.ModuleType("homeassistant")
 
+    components = types.ModuleType("homeassistant.components")
+    class _BaseEntity:
+        _attr_has_entity_name = False
+
+        @property
+        def name(self):  # pragma: no cover - convenience
+            return getattr(self, "_attr_name", None)
+
+        @property
+        def unique_id(self):  # pragma: no cover - convenience
+            return getattr(self, "_attr_unique_id", None)
+
+    binary_sensor_mod = types.ModuleType("homeassistant.components.binary_sensor")
+    class BinarySensorEntity(_BaseEntity):
+        pass
+
+    number_mod = types.ModuleType("homeassistant.components.number")
+    class NumberEntity(_BaseEntity):
+        pass
+
+    select_mod = types.ModuleType("homeassistant.components.select")
+    class SelectEntity(_BaseEntity):
+        pass
+
+    sensor_mod = types.ModuleType("homeassistant.components.sensor")
+    class SensorEntity(_BaseEntity):
+        pass
+
+    binary_sensor_mod.BinarySensorEntity = BinarySensorEntity
+    number_mod.NumberEntity = NumberEntity
+    select_mod.SelectEntity = SelectEntity
+    sensor_mod.SensorEntity = SensorEntity
+
+    components.binary_sensor = binary_sensor_mod
+    components.number = number_mod
+    components.select = select_mod
+    components.sensor = sensor_mod
+
     const = types.ModuleType("homeassistant.const")
 
     class Platform:
@@ -78,6 +116,9 @@ def _create_homeassistant_stub() -> None:
     class ConfigFlow:
         VERSION = 1
 
+        def __init_subclass__(cls, **kwargs):  # noqa: D401, ANN001
+            return super().__init_subclass__()
+
         async def async_set_unique_id(self, unique_id: str):
             self._unique_id = unique_id
 
@@ -103,10 +144,24 @@ def _create_homeassistant_stub() -> None:
 
     helpers = types.ModuleType("homeassistant.helpers")
 
+    entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
+    def _add_entities_callback(entities):
+        return entities
+
+    entity_platform.AddEntitiesCallback = type("AddEntitiesCallback", (), {})
+    helpers.entity_platform = entity_platform
+
     update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
 
     class UpdateFailed(Exception):
         pass
+
+    class CoordinatorEntity:
+        def __init__(self, coordinator=None):
+            self.coordinator = coordinator
+            self.hass = getattr(coordinator, "hass", None)
+
+        __class_getitem__ = classmethod(lambda cls, item: cls)
 
     class DataUpdateCoordinator:
         __class_getitem__ = classmethod(lambda cls, item: cls)
@@ -125,20 +180,28 @@ def _create_homeassistant_stub() -> None:
 
     update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
     update_coordinator.UpdateFailed = UpdateFailed
+    update_coordinator.CoordinatorEntity = CoordinatorEntity
 
     helpers.update_coordinator = update_coordinator
 
     ha.const = const
+    ha.components = components
     ha.core = core
     ha.helpers = helpers
     ha.config_entries = config_entries
 
     sys.modules["homeassistant"] = ha
+    sys.modules["homeassistant.components"] = components
+    sys.modules["homeassistant.components.binary_sensor"] = binary_sensor_mod
+    sys.modules["homeassistant.components.number"] = number_mod
+    sys.modules["homeassistant.components.select"] = select_mod
+    sys.modules["homeassistant.components.sensor"] = sensor_mod
     sys.modules["homeassistant.const"] = const
     sys.modules["homeassistant.core"] = core
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.typing"] = typing_mod
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
+    sys.modules["homeassistant.helpers.entity_platform"] = entity_platform
     sys.modules["homeassistant.config_entries"] = config_entries
 
 

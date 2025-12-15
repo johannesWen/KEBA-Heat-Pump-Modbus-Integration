@@ -106,6 +106,34 @@ def test_read_all_decodes_values(monkeypatch, sample_registers):
     assert result["float_reg"] == pytest.approx(10.0, rel=1e-3)
 
 
+def test_read_all_handles_error_response(monkeypatch, sample_registers):
+    error_reg = sample_registers[0]
+    responses = {
+        ("holding", error_reg.address, error_reg.length): DummyResponse([], error=True)
+    }
+    client = KebaModbusClient("localhost", 502, 1)
+    recording_client = RecordingClient(responses)
+    monkeypatch.setattr(client, "_ensure_client", lambda: recording_client)
+
+    result = client.read_all([error_reg])
+
+    assert result == {error_reg.unique_id: None}
+
+
+def test_read_all_recovers_from_exceptions(monkeypatch, sample_registers):
+    client = KebaModbusClient("localhost", 502, 1)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(client, "_ensure_client", lambda: object())
+    monkeypatch.setattr(client, "_read_register_list", boom)
+
+    result = client.read_all([sample_registers[0]])
+
+    assert result[sample_registers[0].unique_id] is None
+
+
 def test_read_register_list_falls_back_without_count():
     reg = ModbusRegister(
         unique_id="legacy",
@@ -122,6 +150,23 @@ def test_read_register_list_falls_back_without_count():
 
     assert result == [10, 11]
     assert legacy_client.read_calls == [10, 11]
+
+
+def test_read_register_list_handles_error_response():
+    reg = ModbusRegister(
+        unique_id="err",
+        name="Error",
+        register_type="holding",
+        address=5,
+        data_type="uint16",
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    responses = {("holding", 5, 1): DummyResponse([], error=True)}
+    reader = RecordingClient(responses)
+
+    result = client._read_register_list(reader, reg)
+
+    assert result is None
 
 
 def test_write_register_scales_and_validates(monkeypatch):
@@ -141,6 +186,41 @@ def test_write_register_scales_and_validates(monkeypatch):
     client.write_register(reg, 4)
 
     assert recorder.writes == [(7, 2)]
+
+
+def test_write_register_supports_boolean(monkeypatch):
+    reg = ModbusRegister(
+        unique_id="bool",
+        name="Boolean",
+        register_type="holding",
+        address=8,
+        data_type="uint16",
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    recorder = RecordingClient({})
+    monkeypatch.setattr(client, "_ensure_client", lambda: recorder)
+
+    client.write_register(reg, True)
+
+    assert recorder.writes == [(8, 1)]
+
+
+def test_write_register_raises_on_error_response(monkeypatch):
+    reg = ModbusRegister(
+        unique_id="err_write",
+        name="Err",
+        register_type="holding",
+        address=9,
+        data_type="uint16",
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    error_response = DummyResponse([], error=True)
+    recorder = RecordingClient({})
+    recorder.write_register = lambda address, value: error_response
+    monkeypatch.setattr(client, "_ensure_client", lambda: recorder)
+
+    with pytest.raises(ModbusException):
+        client.write_register(reg, 1)
 
 
 @pytest.mark.parametrize(
@@ -164,6 +244,40 @@ def test_decode_registers_various_types(data_type, raw, expected):
     value = KebaModbusClient._decode_registers(raw, reg)
 
     assert value == expected
+
+
+def test_decode_registers_handles_empty_and_bool():
+    reg_bool = ModbusRegister(
+        unique_id="bool_decoder",
+        name="Bool",
+        register_type="input",
+        address=0,
+        data_type="boolean",
+    )
+    reg_unknown = ModbusRegister(
+        unique_id="unknown",
+        name="Unknown",
+        register_type="input",
+        address=0,
+        data_type="mystery",
+    )
+
+    assert KebaModbusClient._decode_registers([], reg_bool) is None
+    assert KebaModbusClient._decode_registers([1], reg_bool) == 1.0
+    assert KebaModbusClient._decode_registers([123], reg_unknown) == 123
+
+
+def test_decode_registers_scale_failure_returns_raw_value():
+    reg = ModbusRegister(
+        unique_id="bad_scale",
+        name="Bad Scale",
+        register_type="input",
+        address=0,
+        data_type="uint16",
+        scale="not-a-number",  # type: ignore[arg-type]
+    )
+
+    assert KebaModbusClient._decode_registers([5], reg) == 5
 
 
 def test_write_register_rejects_invalid_requests(monkeypatch):
