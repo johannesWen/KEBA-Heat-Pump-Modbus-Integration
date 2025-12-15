@@ -1,0 +1,278 @@
+import pytest
+
+from custom_components.keba_heat_pump_modbus.binary_sensor import (
+    KebaBinarySensor,
+    async_setup_entry as setup_binary_sensors,
+)
+from custom_components.keba_heat_pump_modbus.config_flow import (
+    ConfigFlow,
+    OptionsFlowHandler,
+)
+from custom_components.keba_heat_pump_modbus.const import (
+    CONF_CIRCUITS,
+    CONF_SCAN_INTERVAL,
+    DATA_CLIENT,
+    DATA_COORDINATOR,
+    DATA_REGISTERS,
+    DOMAIN,
+)
+from custom_components.keba_heat_pump_modbus.models import ModbusRegister
+from custom_components.keba_heat_pump_modbus.number import (
+    KebaControl,
+    async_setup_entry as setup_numbers,
+)
+from custom_components.keba_heat_pump_modbus.select import (
+    KebaSelect,
+    async_setup_entry as setup_selects,
+)
+from custom_components.keba_heat_pump_modbus.sensor import (
+    KebaSensor,
+    async_setup_entry as setup_sensors,
+)
+
+
+class DummyCoordinator:
+    def __init__(self, data=None, hass=None):
+        self.data = data or {}
+        self.refresh_called = False
+        self.hass = hass
+
+    async def async_request_refresh(self):
+        self.refresh_called = True
+
+
+class DummyClient:
+    def __init__(self):
+        self.writes = []
+
+    def write_register(self, reg, value):
+        self.writes.append((reg, value))
+
+
+class DummyHass:
+    def __init__(self):
+        self.data = {}
+
+    async def async_add_executor_job(self, func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+
+def create_entry(data=None, options=None, entry_id="entry1"):
+    from homeassistant.config_entries import ConfigEntry
+
+    return ConfigEntry(data=data, options=options, entry_id=entry_id)
+
+
+def test_binary_sensor_entity_behaviour():
+    coordinator = DummyCoordinator({"bin": 1, "icon": 0})
+    entry = create_entry(entry_id="bin1")
+    reg = ModbusRegister(
+        unique_id="bin",
+        name="Binary",
+        register_type="input",
+        address=1,
+        entity_platform="binary_sensor",
+        device="system",
+        icon="mdi:eye",
+        icon_on="mdi:eye-check",
+        icon_off="mdi:eye-off",
+    )
+
+    entity = KebaBinarySensor(coordinator, entry, reg)
+
+    assert entity.unique_id == "bin1_bin"
+    assert entity.device_info["name"] == "System"
+    assert entity.is_on is True
+    assert entity.icon == "mdi:eye-check"
+
+    coordinator.data["bin"] = 0
+    assert entity.is_on is False
+    assert entity.icon == "mdi:eye-off"
+
+
+def test_binary_sensor_setup_filters_platform():
+    hass = DummyHass()
+    entry = create_entry()
+    coordinator = DummyCoordinator()
+    registers = [
+        ModbusRegister(
+            unique_id="bin",
+            name="Binary",
+            register_type="input",
+            address=1,
+            entity_platform="binary_sensor",
+        ),
+        ModbusRegister(
+            unique_id="sensor",
+            name="Other",
+            register_type="input",
+            address=2,
+            entity_platform="sensor",
+        ),
+    ]
+    hass.data = {DOMAIN: {entry.entry_id: {DATA_COORDINATOR: coordinator, DATA_REGISTERS: registers}}}
+
+    added = []
+
+    def _add_entities(entities):
+        added.extend(entities)
+
+    import asyncio
+
+    asyncio.run(setup_binary_sensors(hass, entry, _add_entities))
+
+    assert len(added) == 1
+    assert isinstance(added[0], KebaBinarySensor)
+
+
+def test_config_flow_creates_entries_and_options():
+    flow = ConfigFlow()
+
+    import asyncio
+
+    form = asyncio.run(flow.async_step_user())
+    assert form["step_id"] == "user"
+
+    user_input = {"host": "1.2.3.4", "heat_circuits_used": 2}
+    result = asyncio.run(flow.async_step_user(user_input))
+    assert result["title"].startswith("KEBA Heat Pump")
+    assert flow._unique_id == f"{DOMAIN}_1.2.3.4"
+
+    entry = create_entry(options={CONF_SCAN_INTERVAL: 10, CONF_CIRCUITS: 2})
+    options_flow = OptionsFlowHandler(entry)
+
+    options_form = asyncio.run(options_flow.async_step_user())
+    assert options_form["step_id"] == "user"
+
+    options_result = asyncio.run(
+        options_flow.async_step_user({CONF_SCAN_INTERVAL: 5, CONF_CIRCUITS: 1})
+    )
+    assert options_result["data"][CONF_SCAN_INTERVAL] == 5
+
+
+def test_number_entity_write_and_setup(monkeypatch):
+    hass = DummyHass()
+    entry = create_entry()
+    coordinator = DummyCoordinator({"num": 42}, hass=hass)
+    client = DummyClient()
+    reg = ModbusRegister(
+        unique_id="num",
+        name="Number",
+        register_type="holding",
+        address=5,
+        entity_platform="controls",
+    )
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: {
+                DATA_COORDINATOR: coordinator,
+                DATA_REGISTERS: [reg],
+                DATA_CLIENT: client,
+            }
+        }
+    }
+
+    added = []
+
+    def _add_entities(entities):
+        added.extend(entities)
+
+    import asyncio
+
+    asyncio.run(setup_numbers(hass, entry, _add_entities))
+
+    assert len(added) == 1
+    entity: KebaControl = added[0]
+    assert entity.native_value == 42
+
+    asyncio.run(entity.async_set_native_value(55))
+    assert client.writes == [(reg, 55)]
+    assert coordinator.refresh_called is True
+
+
+def test_select_entity_options_and_validation():
+    hass = DummyHass()
+    entry = create_entry()
+    coordinator = DummyCoordinator({"sel": "Off"}, hass=hass)
+    client = DummyClient()
+    valid_reg = ModbusRegister(
+        unique_id="sel",
+        name="Select",
+        register_type="holding",
+        address=6,
+        entity_platform="select",
+        value_map={"0": "Off", "1": "On"},
+    )
+    invalid_reg = ModbusRegister(
+        unique_id="skip",
+        name="Skip",
+        register_type="holding",
+        address=7,
+        entity_platform="select",
+        value_map=None,
+    )
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: {
+                DATA_COORDINATOR: coordinator,
+                DATA_REGISTERS: [valid_reg, invalid_reg],
+                DATA_CLIENT: client,
+            }
+        }
+    }
+
+    added = []
+
+    def _add_entities(entities):
+        added.extend(entities)
+
+    import asyncio
+
+    asyncio.run(setup_selects(hass, entry, _add_entities))
+
+    assert len(added) == 1
+    entity: KebaSelect = added[0]
+    assert entity.current_option == "Off"
+
+    asyncio.run(entity.async_select_option("On"))
+    assert client.writes == [(valid_reg, 1)]
+    assert coordinator.refresh_called is True
+
+    with pytest.raises(ValueError):
+        asyncio.run(entity.async_select_option("Unknown"))
+
+
+def test_sensor_entity_native_value_and_setup():
+    hass = DummyHass()
+    entry = create_entry()
+    coordinator = DummyCoordinator({"sensor": 12.5}, hass=hass)
+    reg = ModbusRegister(
+        unique_id="sensor",
+        name="Temperature",
+        register_type="input",
+        address=10,
+        entity_platform="sensor",
+        unit_of_measurement="°C",
+    )
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: {
+                DATA_COORDINATOR: coordinator,
+                DATA_REGISTERS: [reg],
+            }
+        }
+    }
+
+    added = []
+
+    def _add_entities(entities):
+        added.extend(entities)
+
+    import asyncio
+
+    asyncio.run(setup_sensors(hass, entry, _add_entities))
+
+    assert len(added) == 1
+    entity: KebaSensor = added[0]
+    assert entity.native_value == 12.5
+    assert entity.device_info["name"] == "Heat Pump"
