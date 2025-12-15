@@ -1,0 +1,8 @@
+{
+    "python.testing.pytestArgs": [
+        "./tests",
+        "--cov=./custom_components/keba_heat_pump_modbus",
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}
