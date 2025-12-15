@@ -19,13 +19,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # - name: Determine version
-      #   run: echo "RELEASE_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+      - name: Determine version
+        run: echo "RELEASE_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
 
-      # - name: Create Home Assistant release archive
-      #   run: |
-      #     cd ${{ github.workspace }}/custom_components/keba_heat_pump_modbus
-      #     zip -r ${{ github.workspace }}/keba_heat_pump_modbus.zip ./
+      - name: Create Home Assistant release archive
+        run: |
+          cd ${{ github.workspace }}/custom_components/keba_heat_pump_modbus
+          zip -r ${{ github.workspace }}/keba_heat_pump_modbus.zip ./
+      - name: Upload release archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keba_heat_pump_modbus
+          path: keba_heat_pump_modbus.zip
+          if-no-files-found: error
 
       # - name: Publish GitHub release
       #   uses: softprops/action-gh-release@v2
