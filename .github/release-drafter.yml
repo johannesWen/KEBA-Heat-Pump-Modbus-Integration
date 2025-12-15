@@ -29,7 +29,12 @@ template: |
   ## Changes
 
   $CHANGES
-  
+
   ## Contributors
 
   $CONTRIBUTORS
+
+  ## Download
+
+  - [keba_heat_pump_modbus.zip](https://github.com/$OWNER/$REPOSITORY/releases/download/v$RESOLVED_VERSION/keba_heat_pump_modbus.zip)
+  ## Contributors
