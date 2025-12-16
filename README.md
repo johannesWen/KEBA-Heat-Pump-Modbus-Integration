@@ -63,10 +63,48 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 
 ## Homeassistant Devices
 
-| Heat Pump | Buffer Tank | Heat Circuit |
-|:---:|:---:|:---:|
-| <img src="assets/screenshots/heat_pump.png" width="250" /> | <img src="assets/screenshots/buffer_tank.png" width="250" /> |<img src="assets/screenshots/heat_circuit.png" width="250" /> |
+<!-- Table 1 -->
+<table style="border-collapse: collapse; width: 100%;">
+  <thead>
+    <tr>
+      <th style="text-align: center; vertical-align: top; padding: 8px;">Heat Pump</th>
+      <th style="text-align: center; vertical-align: top; padding: 8px;">Buffer Tank</th>
+      <th style="text-align: center; vertical-align: top; padding: 8px;">Heat Circuit</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center; vertical-align: top; padding: 8px;">
+        <img src="assets/screenshots/heat_pump.png" width="250" alt="Heat Pump" />
+      </td>
+      <td style="text-align: center; vertical-align: top; padding: 8px;">
+        <img src="assets/screenshots/buffer_tank.png" width="250" alt="Buffer Tank" />
+      </td>
+      <td style="text-align: center; vertical-align: top; padding: 8px;">
+        <img src="assets/screenshots/heat_circuit.png" width="250" alt="Heat Circuit" />
+      </td>
+    </tr>
+  </tbody>
+</table>
 
-| Hot Water Tank | System |
-|:---:|:---:|
-| <img src="assets/screenshots/hot_water_tank.png" width="250" /> | <img src="assets/screenshots/system.png" width="250" /> |
+<br />
+
+<!-- Table 2 -->
+<table style="border-collapse: collapse; width: 100%;">
+  <thead>
+    <tr>
+      <th style="text-align: center; vertical-align: top; padding: 8px;">Hot Water Tank</th>
+      <th style="text-align: center; vertical-align: top; padding: 8px;">System</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center; vertical-align: top; padding: 8px;">
+        <img src="assets/screenshots/hot_water_tank.png" width="250" alt="Hot Water Tank" />
+      </td>
+      <td style="text-align: center; vertical-align: top; padding: 8px;">
+        <img src="assets/screenshots/system.png" width="250" alt="System" />
+      </td>
+    </tr>
+  </tbody>
+</table>
