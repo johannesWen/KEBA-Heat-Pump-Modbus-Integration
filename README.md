@@ -68,7 +68,7 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
   <thead>
     <tr>
       <th style="text-align: center; vertical-align: top; padding: 8px;">Heat Pump</th>
-      <th style="text-align: center; vertical-align: top; padding: 8px;">Buffer Tank</th>
+      <th style="text-align: center; valign: top; padding: 8px;">Buffer Tank</th>
       <th style="text-align: center; vertical-align: top; padding: 8px;">Heat Circuit</th>
     </tr>
   </thead>
@@ -77,7 +77,7 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
       <td style="text-align: center; vertical-align: top; padding: 8px;">
         <img src="assets/screenshots/heat_pump.png" width="250" alt="Heat Pump" />
       </td>
-      <td style="text-align: center; vertical-align: top; padding: 8px;">
+      <td style="text-align: center; valign: top; padding: 8px;">
         <img src="assets/screenshots/buffer_tank.png" width="250" alt="Buffer Tank" />
       </td>
       <td style="text-align: center; vertical-align: top; padding: 8px;">
