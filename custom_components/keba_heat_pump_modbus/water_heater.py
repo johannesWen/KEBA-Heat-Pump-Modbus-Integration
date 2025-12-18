@@ -4,6 +4,10 @@ import logging
 from typing import Any, Dict, List
 
 from homeassistant.components.water_heater import (
+    STATE_ECO,
+    STATE_HEAT_PUMP,
+    STATE_OFF,
+    STATE_PERFORMANCE,
     WaterHeaterEntity,
     WaterHeaterEntityFeature,
 )
@@ -20,13 +24,23 @@ from .models import ModbusRegister
 
 _LOGGER = logging.getLogger(__name__)
 
-MODE_TO_VALUE = {
+_OPERATION_TO_VALUE = {
     "off": 0,
+    STATE_OFF: 0,
     "automatic": 1,
+    STATE_ECO: 1,
     "on": 2,
+    STATE_HEAT_PUMP: 2,
     "manual": 3,
+    STATE_PERFORMANCE: 3,
 }
-VALUE_TO_MODE = {value: key for key, value in MODE_TO_VALUE.items()}
+_STRING_TO_VALUE = {key.lower(): value for key, value in _OPERATION_TO_VALUE.items()}
+_VALUE_TO_OPERATION = {
+    0: STATE_OFF,
+    1: STATE_ECO,
+    2: STATE_HEAT_PUMP,
+    3: STATE_PERFORMANCE,
+}
 
 
 async def async_setup_entry(
@@ -75,7 +89,7 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
         WaterHeaterEntityFeature.TARGET_TEMPERATURE
         | WaterHeaterEntityFeature.OPERATION_MODE
     )
-    _attr_operation_list = list(MODE_TO_VALUE.keys())
+    _attr_operation_list = [STATE_OFF, STATE_ECO, STATE_HEAT_PUMP, STATE_PERFORMANCE]
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(
@@ -153,10 +167,11 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
 
         if isinstance(raw_mode, str):
             normalized = raw_mode.lower()
-            if normalized in MODE_TO_VALUE:
-                return normalized
+            if normalized in _STRING_TO_VALUE:
+                value = _STRING_TO_VALUE[normalized]
+                return _VALUE_TO_OPERATION.get(value)
         elif isinstance(raw_mode, (int, float)):
-            return VALUE_TO_MODE.get(int(raw_mode))
+            return _VALUE_TO_OPERATION.get(int(raw_mode))
 
         return None
 
@@ -170,9 +185,10 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_set_operation_mode(self, operation_mode: str) -> None:
-        if operation_mode not in MODE_TO_VALUE:
+        normalized = operation_mode.lower()
+        if normalized not in _STRING_TO_VALUE:
             raise ValueError(f"Unsupported operation mode: {operation_mode}")
-        mode_value = MODE_TO_VALUE[operation_mode]
+        mode_value = _STRING_TO_VALUE[normalized]
         await self.hass.async_add_executor_job(
             self._client.write_register, self._mode_reg, mode_value
         )
