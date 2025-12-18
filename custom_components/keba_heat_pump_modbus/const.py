@@ -3,6 +3,11 @@ from homeassistant.const import Platform
 
 DOMAIN = "keba_heat_pump_modbus"
 
+try:
+    WATER_HEATER_PLATFORM = Platform.WATER_HEATER
+except AttributeError:
+    WATER_HEATER_PLATFORM = "water_heater"
+
 CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_UNIT_ID = "unit_id"
@@ -23,6 +28,7 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.NUMBER,
     Platform.SELECT,
+    WATER_HEATER_PLATFORM,
 ]
 
 DEVICE_NAME_MAP = {

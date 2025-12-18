@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List
+
+from homeassistant.components.water_heater import (
+    WaterHeaterEntity,
+    WaterHeaterEntityFeature,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_TEMPERATURE, TEMP_CELSIUS
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import DATA_CLIENT, DATA_COORDINATOR, DATA_REGISTERS, DEVICE_NAME_MAP, DOMAIN
+from .coordinator import KebaCoordinator
+from .modbus_client import KebaModbusClient
+from .models import ModbusRegister
+
+_LOGGER = logging.getLogger(__name__)
+
+MODE_TO_VALUE = {
+    "off": 0,
+    "automatic": 1,
+    "on": 2,
+    "manual": 3,
+}
+VALUE_TO_MODE = {value: key for key, value in MODE_TO_VALUE.items()}
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: KebaCoordinator = data[DATA_COORDINATOR]
+    registers: List[ModbusRegister] = data[DATA_REGISTERS]
+    client: KebaModbusClient = data[DATA_CLIENT]
+
+    entities: List[KebaWaterHeater] = []
+
+    current_temp_reg = _get_register(registers, "temperature_top_dhw_tank1")
+    target_temp_reg = _get_register(registers, "temperature_top_set_dhw_tank1")
+    mode_reg = _get_register(registers, "operating_mode_dhw_tank1")
+
+    if current_temp_reg and target_temp_reg and mode_reg:
+        entities.append(
+            KebaWaterHeater(
+                coordinator=coordinator,
+                entry=entry,
+                current_temp_reg=current_temp_reg,
+                target_temp_reg=target_temp_reg,
+                mode_reg=mode_reg,
+                client=client,
+            )
+        )
+    else:
+        _LOGGER.warning("Missing one or more DHW tank registers; water heater not created")
+
+    async_add_entities(entities)
+
+
+def _get_register(registers: List[ModbusRegister], unique_id: str) -> ModbusRegister | None:
+    for reg in registers:
+        if reg.unique_id == unique_id:
+            return reg
+    return None
+
+
+class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
+    """Water heater entity for the domestic hot water tank."""
+
+    _attr_has_entity_name = True
+    _attr_supported_features = (
+        WaterHeaterEntityFeature.TARGET_TEMPERATURE
+        | WaterHeaterEntityFeature.OPERATION_MODE
+    )
+    _attr_operation_list = list(MODE_TO_VALUE.keys())
+    _attr_temperature_unit = TEMP_CELSIUS
+
+    def __init__(
+        self,
+        coordinator: KebaCoordinator,
+        entry: ConfigEntry,
+        current_temp_reg: ModbusRegister,
+        target_temp_reg: ModbusRegister,
+        mode_reg: ModbusRegister,
+        client: KebaModbusClient,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._current_temp_reg = current_temp_reg
+        self._target_temp_reg = target_temp_reg
+        self._mode_reg = mode_reg
+        self._client = client
+
+        self._attr_unique_id = f"{entry.entry_id}_{mode_reg.unique_id}_water_heater"
+        self._attr_name = "Hot Water Tank"
+        self._attr_icon = "mdi:water-boiler"
+
+        self._attr_min_temp = (
+            target_temp_reg.native_min_value
+            if target_temp_reg.native_min_value is not None
+            else None
+        )
+        self._attr_max_temp = (
+            target_temp_reg.native_max_value
+            if target_temp_reg.native_max_value is not None
+            else None
+        )
+        self._attr_target_temperature_step = (
+            float(target_temp_reg.native_step)
+            if target_temp_reg.native_step is not None
+            else 0.5
+        )
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        device_key = self._target_temp_reg.device or "dhw_tank"
+        device_name = DEVICE_NAME_MAP.get(
+            device_key, device_key.replace("_", " ").title()
+        )
+
+        return {
+            "identifiers": {(DOMAIN, f"{self._entry.entry_id}_{device_key}")},
+            "name": f"{device_name}",
+            "manufacturer": "KEBA",
+            "model": "Heat Pump (Modbus)",
+            "configuration_url": None,
+        }
+
+    @property
+    def current_temperature(self) -> float | None:
+        if self.coordinator.data is None:
+            return None
+        value = self.coordinator.data.get(self._current_temp_reg.unique_id)
+        return float(value) if value is not None else None
+
+    @property
+    def target_temperature(self) -> float | None:
+        if self.coordinator.data is None:
+            return None
+        value = self.coordinator.data.get(self._target_temp_reg.unique_id)
+        return float(value) if value is not None else None
+
+    @property
+    def current_operation(self) -> str | None:
+        if self.coordinator.data is None:
+            return None
+        raw_mode = self.coordinator.data.get(self._mode_reg.unique_id)
+        if raw_mode is None:
+            return None
+
+        if isinstance(raw_mode, str):
+            normalized = raw_mode.lower()
+            if normalized in MODE_TO_VALUE:
+                return normalized
+        elif isinstance(raw_mode, (int, float)):
+            return VALUE_TO_MODE.get(int(raw_mode))
+
+        return None
+
+    async def async_set_temperature(self, **kwargs: Any) -> None:
+        if ATTR_TEMPERATURE not in kwargs:
+            return
+        temperature = float(kwargs[ATTR_TEMPERATURE])
+        await self.hass.async_add_executor_job(
+            self._client.write_register, self._target_temp_reg, temperature
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_set_operation_mode(self, operation_mode: str) -> None:
+        if operation_mode not in MODE_TO_VALUE:
+            raise ValueError(f"Unsupported operation mode: {operation_mode}")
+        mode_value = MODE_TO_VALUE[operation_mode]
+        await self.hass.async_add_executor_job(
+            self._client.write_register, self._mode_reg, mode_value
+        )
+        await self.coordinator.async_request_refresh()
