@@ -3,5 +3,9 @@
   "extends": [
     "config:best-practices"
   ],
-  "prConcurrentLimit": 0
+  "prConcurrentLimit": 0,
+  "pinDigests": false,
+  "digest": {
+    "enabled": false
+  }
 }
