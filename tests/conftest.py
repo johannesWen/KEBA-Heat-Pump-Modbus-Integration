@@ -66,15 +66,40 @@ def _create_homeassistant_stub() -> None:
     class SensorEntity(_BaseEntity):
         pass
 
+    water_heater_mod = types.ModuleType("homeassistant.components.water_heater")
+
+    class WaterHeaterEntityFeature:
+        TARGET_TEMPERATURE = 1
+        OPERATION_MODE = 2
+
+    class WaterHeaterEntity(_BaseEntity):
+        _attr_operation_list = []
+
+        @property
+        def operation_list(self):
+            return getattr(self, "_attr_operation_list", [])
+
+    STATE_OFF = "off"
+    STATE_ECO = "eco"
+    STATE_HEAT_PUMP = "heat_pump"
+    STATE_PERFORMANCE = "performance"
+
     binary_sensor_mod.BinarySensorEntity = BinarySensorEntity
     number_mod.NumberEntity = NumberEntity
     select_mod.SelectEntity = SelectEntity
     sensor_mod.SensorEntity = SensorEntity
+    water_heater_mod.WaterHeaterEntity = WaterHeaterEntity
+    water_heater_mod.WaterHeaterEntityFeature = WaterHeaterEntityFeature
+    water_heater_mod.STATE_OFF = STATE_OFF
+    water_heater_mod.STATE_ECO = STATE_ECO
+    water_heater_mod.STATE_HEAT_PUMP = STATE_HEAT_PUMP
+    water_heater_mod.STATE_PERFORMANCE = STATE_PERFORMANCE
 
     components.binary_sensor = binary_sensor_mod
     components.number = number_mod
     components.select = select_mod
     components.sensor = sensor_mod
+    components.water_heater = water_heater_mod
 
     const = types.ModuleType("homeassistant.const")
 
@@ -84,7 +109,14 @@ def _create_homeassistant_stub() -> None:
         NUMBER = "number"
         SELECT = "select"
 
+    class UnitOfTemperature:
+        CELSIUS = "°C"
+
+    ATTR_TEMPERATURE = "temperature"
+
     const.Platform = Platform
+    const.UnitOfTemperature = UnitOfTemperature
+    const.ATTR_TEMPERATURE = ATTR_TEMPERATURE
 
     core = types.ModuleType("homeassistant.core")
 
@@ -196,6 +228,7 @@ def _create_homeassistant_stub() -> None:
     sys.modules["homeassistant.components.number"] = number_mod
     sys.modules["homeassistant.components.select"] = select_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
+    sys.modules["homeassistant.components.water_heater"] = water_heater_mod
     sys.modules["homeassistant.const"] = const
     sys.modules["homeassistant.core"] = core
     sys.modules["homeassistant.helpers"] = helpers
