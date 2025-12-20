@@ -31,12 +31,12 @@ template: |
   $CHANGES
 
 autolabeler:
-  - label: 'bug'
+  - label: 'type-bug'
     branch:
       - '/fix\/.+/'
     title:
       - '/fix/i'
-  - label: 'enhancement'
+  - label: 'type-enhancement'
     branch:
       - '/feature\/.+/'
     body:
