@@ -29,6 +29,16 @@ from custom_components.keba_heat_pump_modbus.sensor import (
     KebaSensor,
     async_setup_entry as setup_sensors,
 )
+from custom_components.keba_heat_pump_modbus.water_heater import (
+    KebaWaterHeater,
+    async_setup_entry as setup_water_heaters,
+)
+from homeassistant.components.water_heater import (
+    STATE_ECO,
+    STATE_HEAT_PUMP,
+    STATE_OFF,
+    STATE_PERFORMANCE,
+)
 
 
 class DummyCoordinator:
@@ -276,3 +286,97 @@ def test_sensor_entity_native_value_and_setup():
     entity: KebaSensor = added[0]
     assert entity.native_value == 12.5
     assert entity.device_info["name"] == "Heat Pump"
+
+
+def _create_water_heater_registers():
+    return (
+        ModbusRegister(
+            unique_id="temperature_top_dhw_tank1",
+            name="Top Temperature",
+            register_type="input",
+            address=11,
+            entity_platform="sensor",
+            device="dhw_tank",
+        ),
+        ModbusRegister(
+            unique_id="temperature_top_set_dhw_tank1",
+            name="Target Temperature",
+            register_type="holding",
+            address=12,
+            entity_platform="controls",
+            device="dhw_tank",
+            native_min_value=35,
+            native_max_value=65,
+            native_step=0.5,
+        ),
+        ModbusRegister(
+            unique_id="operating_mode_dhw_tank1",
+            name="Operating Mode",
+            register_type="holding",
+            address=13,
+            entity_platform="controls",
+            device="dhw_tank",
+        ),
+    )
+
+
+def test_water_heater_setup_and_properties():
+    hass = DummyHass()
+    entry = create_entry()
+    current_reg, target_reg, mode_reg = _create_water_heater_registers()
+    coordinator = DummyCoordinator(
+        {
+            current_reg.unique_id: 50.0,
+            target_reg.unique_id: 55.0,
+            mode_reg.unique_id: 2,
+        },
+        hass=hass,
+    )
+    client = DummyClient()
+
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: {
+                DATA_COORDINATOR: coordinator,
+                DATA_REGISTERS: [current_reg, target_reg, mode_reg],
+                DATA_CLIENT: client,
+            }
+        }
+    }
+
+    added = []
+
+    def _add_entities(entities):
+        added.extend(entities)
+
+    import asyncio
+
+    asyncio.run(setup_water_heaters(hass, entry, _add_entities))
+
+    assert len(added) == 1
+    entity: KebaWaterHeater = added[0]
+    assert entity.unique_id == f"{entry.entry_id}_{mode_reg.unique_id}_water_heater"
+    assert entity.name == "Hot Water Tank"
+    assert entity.current_temperature == 50.0
+    assert entity.target_temperature == 55.0
+    assert entity.current_operation == STATE_HEAT_PUMP
+    assert entity.operation_list == [STATE_OFF, STATE_ECO, STATE_HEAT_PUMP, STATE_PERFORMANCE]
+
+    # String mode values are normalized
+    coordinator.data[mode_reg.unique_id] = "automatic"
+    assert entity.current_operation == STATE_ECO
+
+    # Set target temperature writes to client and refreshes
+    asyncio.run(entity.async_set_temperature(**{"temperature": 60}))
+    assert client.writes[0] == (target_reg, 60.0)
+    assert coordinator.refresh_called is True
+
+    # Set operation mode writes mapped value
+    coordinator.refresh_called = False
+    asyncio.run(entity.async_set_operation_mode(STATE_PERFORMANCE))
+    assert client.writes[1] == (mode_reg, 3)
+    assert coordinator.refresh_called is True
+
+    # Invalid mode raises
+    with pytest.raises(ValueError):
+        asyncio.run(entity.async_set_operation_mode("unsupported"))
