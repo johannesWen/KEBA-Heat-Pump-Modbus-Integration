@@ -14,6 +14,7 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 ## What the integration does
 
 - Connects to a KEBA heat pump via Modbus TCP using the host, port, and unit ID you configure.
+  - Tested heat pump: [M-Tec](https://www.mtec-systems.com/) WPS412
 - Polls defined Modbus registers on a configurable interval to keep data fresh.
 - Supports some control entities to change operating modes, temperature, and settings directly from Home Assistant.
 - Provides sensors, binary sensors, number and select entities for heat pump components (system, hot water tank, buffer tank, and up to four heating circuits) with manufacturer, model, and device grouping.
