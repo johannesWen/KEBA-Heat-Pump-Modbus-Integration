@@ -356,14 +356,13 @@ def test_water_heater_setup_and_properties():
     assert len(added) == 1
     entity: KebaWaterHeater = added[0]
     assert entity.unique_id == f"{entry.entry_id}_{mode_reg.unique_id}_water_heater"
-    assert entity.name == "Hot Water Tank"
     assert entity.current_temperature == 50.0
     assert entity.target_temperature == 55.0
     assert entity.current_operation == STATE_HEAT_PUMP
     assert entity.operation_list == [STATE_OFF, STATE_ECO, STATE_HEAT_PUMP, STATE_PERFORMANCE]
 
     # String mode values are normalized
-    coordinator.data[mode_reg.unique_id] = "automatic"
+    coordinator.data[mode_reg.unique_id] = "auto"
     assert entity.current_operation == STATE_ECO
 
     # Set target temperature writes to client and refreshes

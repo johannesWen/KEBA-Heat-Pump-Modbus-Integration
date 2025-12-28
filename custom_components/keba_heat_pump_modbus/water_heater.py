@@ -17,7 +17,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_CLIENT, DATA_COORDINATOR, DATA_REGISTERS, DEVICE_NAME_MAP, DOMAIN
+from .const import (
+    DATA_CLIENT,
+    DATA_COORDINATOR,
+    DATA_REGISTERS,
+    DEVICE_NAME_MAP,
+    DOMAIN,
+)
 from .coordinator import KebaCoordinator
 from .modbus_client import KebaModbusClient
 from .models import ModbusRegister
@@ -27,11 +33,11 @@ _LOGGER = logging.getLogger(__name__)
 _OPERATION_TO_VALUE = {
     "off": 0,
     STATE_OFF: 0,
-    "automatic": 1,
+    "auto": 1,
     STATE_ECO: 1,
     "on": 2,
     STATE_HEAT_PUMP: 2,
-    "manual": 3,
+    "heat up": 3,
     STATE_PERFORMANCE: 3,
 }
 _STRING_TO_VALUE = {key.lower(): value for key, value in _OPERATION_TO_VALUE.items()}
@@ -69,12 +75,16 @@ async def async_setup_entry(
             )
         )
     else:
-        _LOGGER.warning("Missing one or more DHW tank registers; water heater not created")
+        _LOGGER.warning(
+            "Missing one or more DHW tank registers; water heater not created"
+        )
 
     async_add_entities(entities)
 
 
-def _get_register(registers: List[ModbusRegister], unique_id: str) -> ModbusRegister | None:
+def _get_register(
+    registers: List[ModbusRegister], unique_id: str
+) -> ModbusRegister | None:
     for reg in registers:
         if reg.unique_id == unique_id:
             return reg
@@ -109,8 +119,9 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
         self._client = client
 
         self._attr_unique_id = f"{entry.entry_id}_{mode_reg.unique_id}_water_heater"
-        self._attr_name = "Hot Water Tank"
+        self._attr_name = None
         self._attr_icon = "mdi:water-boiler"
+        self._attr_translation_key = "hot_water_tank"
 
         self._attr_min_temp = (
             target_temp_reg.native_min_value

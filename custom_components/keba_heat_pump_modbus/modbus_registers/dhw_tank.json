@@ -60,9 +60,9 @@
       "entity_platform": "select",
       "value_map": {
         "0": "Off",
-        "1": "Automatic",
+        "1": "Auto",
         "2": "On",
-        "3": "Manual"
+        "3": "Heat Up"
       }
     },
     {
