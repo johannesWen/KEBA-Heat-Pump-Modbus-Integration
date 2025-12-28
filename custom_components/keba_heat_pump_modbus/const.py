@@ -8,6 +8,11 @@ try:
 except AttributeError:
     WATER_HEATER_PLATFORM = "water_heater"
 
+try:
+    CLIMATE_PLATFORM = Platform.CLIMATE
+except AttributeError:
+    CLIMATE_PLATFORM = "climate"
+
 CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_UNIT_ID = "unit_id"
@@ -28,6 +33,7 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.NUMBER,
     Platform.SELECT,
+    CLIMATE_PLATFORM,
     WATER_HEATER_PLATFORM,
 ]
 

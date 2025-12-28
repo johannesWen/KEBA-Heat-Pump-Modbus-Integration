@@ -68,6 +68,28 @@ def _create_homeassistant_stub() -> None:
 
     water_heater_mod = types.ModuleType("homeassistant.components.water_heater")
 
+    climate_mod = types.ModuleType("homeassistant.components.climate")
+
+    class ClimateEntityFeature:
+        TARGET_TEMPERATURE = 1
+        PRESET_MODE = 2
+
+    class HVACMode:
+        OFF = "off"
+        HEAT = "heat"
+
+    class ClimateEntity(_BaseEntity):
+        _attr_hvac_modes = []
+        _attr_preset_modes = []
+
+        @property
+        def hvac_modes(self):
+            return getattr(self, "_attr_hvac_modes", [])
+
+        @property
+        def preset_modes(self):
+            return getattr(self, "_attr_preset_modes", [])
+
     class WaterHeaterEntityFeature:
         TARGET_TEMPERATURE = 1
         OPERATION_MODE = 2
@@ -94,12 +116,16 @@ def _create_homeassistant_stub() -> None:
     water_heater_mod.STATE_ECO = STATE_ECO
     water_heater_mod.STATE_HEAT_PUMP = STATE_HEAT_PUMP
     water_heater_mod.STATE_PERFORMANCE = STATE_PERFORMANCE
+    climate_mod.ClimateEntity = ClimateEntity
+    climate_mod.ClimateEntityFeature = ClimateEntityFeature
+    climate_mod.HVACMode = HVACMode
 
     components.binary_sensor = binary_sensor_mod
     components.number = number_mod
     components.select = select_mod
     components.sensor = sensor_mod
     components.water_heater = water_heater_mod
+    components.climate = climate_mod
 
     const = types.ModuleType("homeassistant.const")
 
@@ -108,6 +134,7 @@ def _create_homeassistant_stub() -> None:
         BINARY_SENSOR = "binary_sensor"
         NUMBER = "number"
         SELECT = "select"
+        CLIMATE = "climate"
 
     class UnitOfTemperature:
         CELSIUS = "°C"
@@ -229,6 +256,7 @@ def _create_homeassistant_stub() -> None:
     sys.modules["homeassistant.components.select"] = select_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
     sys.modules["homeassistant.components.water_heater"] = water_heater_mod
+    sys.modules["homeassistant.components.climate"] = climate_mod
     sys.modules["homeassistant.const"] = const
     sys.modules["homeassistant.core"] = core
     sys.modules["homeassistant.helpers"] = helpers
