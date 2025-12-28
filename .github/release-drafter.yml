@@ -8,6 +8,7 @@ categories:
   - title: '🐛 Bug Fixes'
     labels:
       - 'type-fix'
+      - 'type-bug'
   - title: '🧰 Maintenance'
     labels: 
       - 'type-chore'
