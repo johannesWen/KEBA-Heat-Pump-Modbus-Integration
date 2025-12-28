@@ -1,0 +1,14 @@
+{
+    "entity": {
+        "water_heater": {
+            "hot_water_tank": {
+                "state": {
+                    "eco": "Auto",
+                    "heat_pump": "On",
+                    "off": "Off",
+                    "performance": "Heat up"
+                }
+            }
+        }
+    }
+}
