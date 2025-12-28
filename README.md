@@ -66,8 +66,8 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 
 | Heat Pump | Buffer Tank | Heat Circuit |
 |:---:|:---:|:---:|
-| <img src="assets/screenshots/heat_pump.png" width="250" /> | <img src="assets/screenshots/buffer_tank.png" width="250" /> |<img src="assets/screenshots/heat_circuit.png" width="250" /> |
+| ![](assets/screenshots/heat_pump.png) | ![](assets/screenshots/buffer_tank.png) | ![](assets/screenshots/heat_circuit.png) |
 
 | Hot Water Tank | System |
 |:---:|:---:|
-| <img src="assets/screenshots/hot_water_tank.png" width="250" /> | <img src="assets/screenshots/system.png" width="250" /> |
+| ![](assets/screenshots/hot_water_tank.png) | ![](assets/screenshots/system.png) |
