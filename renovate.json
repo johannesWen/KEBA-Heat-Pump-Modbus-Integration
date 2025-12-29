@@ -6,7 +6,22 @@
   "prConcurrentLimit": 0,
   "packageRules": [
     {
-      "pinDigests": false
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "pin"
+      ],
+      "enabled": false
+    },
+    {
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "enabled": false
     }
   ],
   "digest": {
