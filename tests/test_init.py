@@ -41,3 +41,68 @@ def test_filter_circuit_registers_keeps_exact_match():
 
     assert len(filtered) == 2
     assert filtered == registers
+
+
+def test_filter_circuit_registers_handles_missing_index():
+    registers = [
+        ModbusRegister(
+            unique_id="bad",
+            name="Bad",
+            register_type="input",
+            address=1,
+            device="circuit_",
+        ),
+        ModbusRegister(
+            unique_id="sys",
+            name="System",
+            register_type="input",
+            address=2,
+            device="system",
+        ),
+    ]
+
+    filtered = _filter_circuit_registers(registers, num_circuits=1)
+
+    assert [reg.unique_id for reg in filtered] == ["sys"]
+
+
+def test_async_unload_entry_closes_client():
+    import asyncio
+
+    class DummyClient:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class DummyConfigEntries:
+        async def async_unload_platforms(self, *_args, **_kwargs):
+            return True
+
+    class DummyHass:
+        def __init__(self):
+            self.data = {}
+            self.config_entries = DummyConfigEntries()
+
+        async def async_add_executor_job(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    from custom_components.keba_heat_pump_modbus.__init__ import (
+        async_unload_entry,
+    )
+    from custom_components.keba_heat_pump_modbus.const import (
+        DATA_CLIENT,
+        DOMAIN,
+    )
+    from homeassistant.config_entries import ConfigEntry
+
+    hass = DummyHass()
+    entry = ConfigEntry(entry_id="entry1")
+    client = DummyClient()
+    hass.data = {DOMAIN: {entry.entry_id: {DATA_CLIENT: client}}}
+
+    result = asyncio.run(async_unload_entry(hass, entry))
+
+    assert result is True
+    assert client.closed is True

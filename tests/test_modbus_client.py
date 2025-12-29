@@ -304,3 +304,63 @@ def test_write_register_rejects_invalid_requests(monkeypatch):
     )
     with pytest.raises(ModbusException):
         client.write_register(input_reg, 1)
+
+
+def test_connect_raises_when_modbus_connect_fails(monkeypatch):
+    class FailingClient:
+        def __init__(self, host, port):
+            self.host = host
+            self.port = port
+
+        def connect(self):
+            return False
+
+    monkeypatch.setattr(
+        "custom_components.keba_heat_pump_modbus.modbus_client.ModbusTcpClient",
+        FailingClient,
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+
+    with pytest.raises(ModbusException):
+        client.connect()
+
+
+def test_write_register_out_of_range(monkeypatch):
+    reg_int16 = ModbusRegister(
+        unique_id="int16",
+        name="Int16",
+        register_type="holding",
+        address=1,
+        data_type="int16",
+    )
+    reg_uint16 = ModbusRegister(
+        unique_id="uint16",
+        name="UInt16",
+        register_type="holding",
+        address=2,
+        data_type="uint16",
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    monkeypatch.setattr(client, "_ensure_client", lambda: RecordingClient({}))
+
+    with pytest.raises(ModbusException):
+        client.write_register(reg_int16, 40000)
+
+    with pytest.raises(ModbusException):
+        client.write_register(reg_uint16, -1)
+
+
+def test_write_register_scale_error(monkeypatch):
+    reg = ModbusRegister(
+        unique_id="scale",
+        name="Scale",
+        register_type="holding",
+        address=3,
+        data_type="uint16",
+        scale=0,
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    monkeypatch.setattr(client, "_ensure_client", lambda: RecordingClient({}))
+
+    with pytest.raises(ZeroDivisionError):
+        client.write_register(reg, 10)
