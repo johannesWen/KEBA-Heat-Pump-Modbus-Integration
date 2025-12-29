@@ -3,6 +3,10 @@
   "extends": [
     "config:best-practices"
   ],
+  "labels": [
+    "type-chore",
+    "version-patch"
+  ],
   "prConcurrentLimit": 0,
   "packageRules": [
     {
