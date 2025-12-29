@@ -1,15 +1,19 @@
 {
   "domain": "keba_heat_pump_modbus",
   "name": "KEBA Heat Pump Modbus",
-  "codeowners": ["@johannesWen"],
+  "codeowners": [
+    "@johannesWen"
+  ],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://example.com/your-repo-or-docs",
   "iot_class": "local_polling",
   "issue_tracker": "https://example.com/your-issues",
-  "loggers": ["custom_components.keba_heat_pump_modbus"],
+  "loggers": [
+    "custom_components.keba_heat_pump_modbus"
+  ],
   "requirements": [
     "pymodbus>=3.6.0"
   ],
-  "version": "1.0.1"
+  "version": "1.1.0"
 }
