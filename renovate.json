@@ -4,7 +4,11 @@
     "config:best-practices"
   ],
   "prConcurrentLimit": 0,
-  "pinDigests": false,
+  "packageRules": [
+    {
+      "pinDigests": false
+    }
+  ],
   "digest": {
     "enabled": false
   }
