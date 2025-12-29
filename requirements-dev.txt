@@ -1,4 +1,4 @@
-homeassistant==2025.12.4
+homeassistant==2025.12.5
 pymodbus>=3.6.0
 pytest>=8.2.0
 pytest-cov>=4.1.0
