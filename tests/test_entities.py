@@ -257,6 +257,27 @@ def test_select_entity_options_and_validation():
         asyncio.run(entity.async_select_option("Unknown"))
 
 
+def test_select_rejects_invalid_value_map_key():
+    hass = DummyHass()
+    entry = create_entry()
+    coordinator = DummyCoordinator({"sel": "Bad"}, hass=hass)
+    client = DummyClient()
+    reg = ModbusRegister(
+        unique_id="sel",
+        name="Select",
+        register_type="holding",
+        address=6,
+        entity_platform="select",
+        value_map={"bad": "Bad"},
+    )
+    entity = KebaSelect(coordinator, entry, reg, client)
+
+    import asyncio
+
+    with pytest.raises(ValueError):
+        asyncio.run(entity.async_select_option("Bad"))
+
+
 def test_sensor_entity_native_value_and_setup():
     hass = DummyHass()
     entry = create_entry()
@@ -386,6 +407,75 @@ def test_water_heater_setup_and_properties():
         asyncio.run(entity.async_set_operation_mode("unsupported"))
 
 
+def test_water_heater_setup_skips_when_missing_registers():
+    hass = DummyHass()
+    entry = create_entry()
+    coordinator = DummyCoordinator(hass=hass)
+    client = DummyClient()
+    registers = [
+        ModbusRegister(
+            unique_id="temperature_top_dhw_tank1",
+            name="Top Temperature",
+            register_type="input",
+            address=11,
+            entity_platform="sensor",
+            device="dhw_tank",
+        )
+    ]
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: {
+                DATA_COORDINATOR: coordinator,
+                DATA_REGISTERS: registers,
+                DATA_CLIENT: client,
+            }
+        }
+    }
+
+    added = []
+
+    def _add_entities(entities):
+        added.extend(entities)
+
+    import asyncio
+
+    asyncio.run(setup_water_heaters(hass, entry, _add_entities))
+
+    assert added == []
+
+
+def test_water_heater_handles_missing_temperature_key():
+    hass = DummyHass()
+    entry = create_entry()
+    current_reg, target_reg, mode_reg = _create_water_heater_registers()
+    coordinator = DummyCoordinator(
+        {
+            current_reg.unique_id: None,
+            target_reg.unique_id: None,
+            mode_reg.unique_id: "mystery",
+        },
+        hass=hass,
+    )
+    client = DummyClient()
+    entity = KebaWaterHeater(
+        coordinator=coordinator,
+        entry=entry,
+        current_temp_reg=current_reg,
+        target_temp_reg=target_reg,
+        mode_reg=mode_reg,
+        client=client,
+    )
+
+    assert entity.current_temperature is None
+    assert entity.target_temperature is None
+    assert entity.current_operation is None
+
+    import asyncio
+
+    asyncio.run(entity.async_set_temperature())
+    assert client.writes == []
+
+
 def _create_climate_registers():
     return (
         ModbusRegister(
@@ -481,3 +571,57 @@ def test_climate_setup_and_properties():
 
     with pytest.raises(ValueError):
         asyncio.run(entity.async_set_preset_mode("Unknown"))
+
+
+def test_climate_without_standby_raises_on_off_mode():
+    hass = DummyHass()
+    entry = create_entry()
+    current_reg = ModbusRegister(
+        unique_id="actual_room_temperature_circuit_2",
+        name="Actual Room Temperature",
+        register_type="input",
+        address=11,
+        entity_platform="sensor",
+        device="circuit_2",
+    )
+    target_reg = ModbusRegister(
+        unique_id="room_set_temperature_circuit_2",
+        name="Room Set Temperature",
+        register_type="holding",
+        address=12,
+        entity_platform="controls",
+        device="circuit_2",
+        native_min_value=5,
+        native_max_value=30,
+        native_step=0.5,
+    )
+    mode_reg = ModbusRegister(
+        unique_id="operating_mode_circuit_2",
+        name="Operating Mode",
+        register_type="holding",
+        address=13,
+        entity_platform="select",
+        device="circuit_2",
+        value_map={"2": "Day"},
+    )
+    coordinator = DummyCoordinator(
+        {current_reg.unique_id: 18.0, target_reg.unique_id: 21.0, mode_reg.unique_id: "day"},
+        hass=hass,
+    )
+    client = DummyClient()
+    entity = KebaHeatingCircuitClimate(
+        coordinator=coordinator,
+        entry=entry,
+        current_temp_reg=current_reg,
+        target_temp_reg=target_reg,
+        mode_reg=mode_reg,
+        client=client,
+        device_key="circuit_2",
+    )
+
+    assert entity.hvac_mode == HVACMode.HEAT
+
+    import asyncio
+
+    with pytest.raises(ValueError):
+        asyncio.run(entity.async_set_hvac_mode(HVACMode.OFF))
