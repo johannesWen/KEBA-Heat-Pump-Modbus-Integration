@@ -9,19 +9,7 @@
       "matchDatasources": [
         "docker"
       ],
-      "matchUpdateTypes": [
-        "pin"
-      ],
-      "enabled": false
-    },
-    {
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchUpdateTypes": [
-        "digest"
-      ],
-      "enabled": false
+      "pinDigests": false
     }
   ],
   "digest": {
