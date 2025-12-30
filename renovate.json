@@ -13,6 +13,9 @@
       "matchDatasources": [
         "docker"
       ],
+      "pinDigests": false
+    },
+    {
       "matchManagers": [
         "github-actions"
       ],
