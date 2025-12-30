@@ -11,7 +11,12 @@
   "packageRules": [
     {
       "matchDatasources": [
-        "docker",
+        "docker"
+      ],
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepTypes": [
         "action"
       ],
       "pinDigests": false
