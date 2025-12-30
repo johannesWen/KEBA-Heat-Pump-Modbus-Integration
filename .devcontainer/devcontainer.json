@@ -3,11 +3,9 @@
   "build": {
     "dockerfile": "Dockerfile"
   },
-
   // This is the default mount behavior for devcontainers:
   // your local repo is mounted into the container at /workspaces/<repo>
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-
   "customizations": {
     "vscode": {
       "extensions": [
@@ -23,8 +21,6 @@
       }
     }
   },
-
-  "postCreateCommand": "python -m pip install -U pip && if [ -f requirements_dev.txt ]; then pip install -r requirements_dev.txt; fi",
-
+  "postCreateCommand": "python -m pip install -U pip && if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi",
   "remoteUser": "vscode"
 }
