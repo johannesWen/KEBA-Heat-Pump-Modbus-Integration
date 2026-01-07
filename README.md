@@ -28,6 +28,8 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 
 ## HACS Installation
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johannesWen&repository=KEBA-Heat-Pump-Modbus-Integration&category=integration)
+
 1. Search for **KEBA Heat Pump Modbus** in HACS and install it.
 2. Restart Home Assistant after installation completes.
 3. Go to **Settings → Devices & Services → Add Integration** and search for **KEBA Heat Pump Modbus**.
