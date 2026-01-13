@@ -93,7 +93,7 @@
       "address": 706,
       "length": 1,
       "data_type": "int16",
-      "unit_of_measurement": "kW",
+      "unit_of_measurement": "W",
       "scale": 1.0,
       "offset": 0.0,
       "precision": 3,
