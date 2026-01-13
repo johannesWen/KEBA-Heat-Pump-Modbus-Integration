@@ -57,6 +57,8 @@ class KebaSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
         self._attr_state_class = reg.state_class
         self._attr_entity_category = reg.entity_category
         self._attr_entity_registry_enabled_default = reg.enabled_default
+        if reg.precision is not None:
+            self._attr_suggested_display_precision = reg.precision
 
     @property
     def device_info(self) -> Dict[str, Any]:
