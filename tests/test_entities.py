@@ -32,6 +32,7 @@ from custom_components.keba_heat_pump_modbus.select import (
 from custom_components.keba_heat_pump_modbus.sensor import (
     KebaSensor,
     KebaCopSensor,
+    KebaFlowRateSensor,
     async_setup_entry as setup_sensors,
 )
 from custom_components.keba_heat_pump_modbus.water_heater import (
@@ -345,6 +346,75 @@ def test_cop_sensor_handles_missing_or_invalid_values():
 
     coordinator.data["heat_power_consumption"] = "unknown"
     assert cop_entity.native_value is None
+
+
+def test_flow_rate_sensor_calculation():
+    entry = create_entry(entry_id="flow1")
+    coordinator = DummyCoordinator(
+        {
+            "heat_power_consumption": 4186,
+            "flow_temperature": 40.0,
+            "reflux_temperature": 30.0,
+        }
+    )
+
+    entity = KebaFlowRateSensor(coordinator, entry)
+
+    assert entity.unique_id == "flow1_flow_rate"
+    assert entity.device_info["name"] == "Heat Pump"
+    assert entity.native_value == 360.0
+
+    coordinator.data["reflux_temperature"] = 45.0
+    assert entity.native_value is None
+
+
+def test_flow_rate_sensor_setup_requires_registers():
+    hass = DummyHass()
+    entry = create_entry()
+    coordinator = DummyCoordinator(hass=hass)
+    registers = [
+        ModbusRegister(
+            unique_id="heat_power_consumption",
+            name="Heat Power Consumption",
+            register_type="holding",
+            address=706,
+            entity_platform="sensor",
+        ),
+        ModbusRegister(
+            unique_id="flow_temperature",
+            name="Flow Temperature",
+            register_type="holding",
+            address=705,
+            entity_platform="sensor",
+        ),
+        ModbusRegister(
+            unique_id="reflux_temperature",
+            name="Reflux Temperature",
+            register_type="holding",
+            address=710,
+            entity_platform="sensor",
+        ),
+    ]
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: {
+                DATA_COORDINATOR: coordinator,
+                DATA_REGISTERS: registers,
+            }
+        }
+    }
+
+    added = []
+
+    def _add_entities(entities):
+        added.extend(entities)
+
+    import asyncio
+
+    asyncio.run(setup_sensors(hass, entry, _add_entities))
+
+    assert len(added) == 5
+    assert any(isinstance(entity, KebaFlowRateSensor) for entity in added)
 
 
 def _create_water_heater_registers():
