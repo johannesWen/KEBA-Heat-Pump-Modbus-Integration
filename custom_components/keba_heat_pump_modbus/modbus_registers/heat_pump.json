@@ -1,6 +1,26 @@
 {
   "registers": [
     {
+      "unique_id": "operating_hours",
+      "name": "Operating Hours",
+      "register_type": "holding",
+      "address": 700,
+      "length": 1,
+      "data_type": "int16",
+      "unit_of_measurement": "h",
+      "scale": 1,
+      "offset": 0.0,
+      "precision": 0,
+      "device": "heat_pump",
+      "icon": "mdi:clock-outline",
+      "device_class": "duration",
+      "state_class": "total_increasing",
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "sensor",
+      "value_map": null
+    },
+    {
       "unique_id": "total_heating_energy",
       "name": "Total Heating Energy",
       "register_type": "holding",
