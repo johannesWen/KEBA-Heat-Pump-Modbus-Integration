@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
@@ -25,12 +25,20 @@ async def async_setup_entry(
     coordinator: KebaCoordinator = data[DATA_COORDINATOR]
     registers: List[ModbusRegister] = data[DATA_REGISTERS]
 
-    entities: List[KebaSensor] = []
+    entities: List[SensorEntity] = []
 
     for reg in registers:
         if reg.entity_platform != "sensor":
             continue
         entities.append(KebaSensor(coordinator, entry, reg))
+
+    register_ids = {reg.unique_id for reg in registers}
+    if {
+        "heat_power_consumption",
+        "flow_temperature",
+        "reflux_temperature",
+    }.issubset(register_ids):
+        entities.append(KebaFlowRateSensor(coordinator, entry))
 
     async_add_entities(entities)
 
@@ -80,3 +88,47 @@ class KebaSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.get(self._reg.unique_id)
+
+
+class KebaFlowRateSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
+    """Derived flow rate sensor based on heat power and delta temperature."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Flow Rate"
+    _attr_native_unit_of_measurement = "L/h"
+    _attr_icon = "mdi:waves"
+    _attr_state_class = "measurement"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: KebaCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_flow_rate"
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, f"{self._entry.entry_id}_heat_pump")},
+            "name": "Heat Pump",
+            "manufacturer": "KEBA",
+            "model": "Heat Pump (Modbus)",
+            "configuration_url": None,
+        }
+
+    @property
+    def native_value(self) -> Optional[float]:
+        if self.coordinator.data is None:
+            return None
+
+        heat_power = self.coordinator.data.get("heat_power_consumption")
+        flow_temp = self.coordinator.data.get("flow_temperature")
+        reflux_temp = self.coordinator.data.get("reflux_temperature")
+
+        if heat_power is None or flow_temp is None or reflux_temp is None:
+            return None
+
+        delta_temp = flow_temp - reflux_temp
+        if delta_temp <= 0:
+            return None
+
+        return round((heat_power * 3600) / (4186 * delta_temp), 1)
