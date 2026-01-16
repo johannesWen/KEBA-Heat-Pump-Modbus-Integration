@@ -118,12 +118,12 @@ class KebaCopSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
         if self.coordinator.data is None:
             return None
 
-        heating_energy = self.coordinator.data.get("total_heating_energy")
-        electrical_energy = self.coordinator.data.get("total_electrical_energy")
+        heating_power = self.coordinator.data.get("heat_power_consumption")
+        electrical_power = self.coordinator.data.get("electrical_power_consumption")
 
-        if not isinstance(heating_energy, (int, float)):
+        if not isinstance(heating_power, (int, float)):
             return None
-        if not isinstance(electrical_energy, (int, float)) or electrical_energy <= 0:
+        if not isinstance(electrical_power, (int, float)) or electrical_power <= 0:
             return None
 
-        return heating_energy / electrical_energy
+        return heating_power / electrical_power

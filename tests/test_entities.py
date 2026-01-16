@@ -125,7 +125,8 @@ def test_binary_sensor_setup_filters_platform():
             entity_platform="sensor",
         ),
     ]
-    hass.data = {DOMAIN: {entry.entry_id: {DATA_COORDINATOR: coordinator, DATA_REGISTERS: registers}}}
+    hass.data = {DOMAIN: {entry.entry_id: {
+        DATA_COORDINATOR: coordinator, DATA_REGISTERS: registers}}}
 
     added = []
 
@@ -309,7 +310,7 @@ def test_sensor_entity_native_value_and_setup():
 
     asyncio.run(setup_sensors(hass, entry, _add_entities))
 
-    assert len(added) == 1
+    assert len(added) == 2
     entity: KebaSensor = added[0]
     assert entity.native_value == 12.5
     assert entity.device_info["name"] == "Heat Pump"
@@ -386,7 +387,8 @@ def test_water_heater_setup_and_properties():
     assert entity.current_temperature == 50.0
     assert entity.target_temperature == 55.0
     assert entity.current_operation == STATE_HEAT_PUMP
-    assert entity.operation_list == [STATE_OFF, STATE_ECO, STATE_HEAT_PUMP, STATE_PERFORMANCE]
+    assert entity.operation_list == [
+        STATE_OFF, STATE_ECO, STATE_HEAT_PUMP, STATE_PERFORMANCE]
 
     # String mode values are normalized
     coordinator.data[mode_reg.unique_id] = "auto"
@@ -606,7 +608,8 @@ def test_climate_without_standby_raises_on_off_mode():
         value_map={"2": "Day"},
     )
     coordinator = DummyCoordinator(
-        {current_reg.unique_id: 18.0, target_reg.unique_id: 21.0, mode_reg.unique_id: "day"},
+        {current_reg.unique_id: 18.0, target_reg.unique_id: 21.0,
+            mode_reg.unique_id: "day"},
         hass=hass,
     )
     client = DummyClient()
