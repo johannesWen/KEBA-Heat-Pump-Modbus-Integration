@@ -31,6 +31,7 @@ from custom_components.keba_heat_pump_modbus.select import (
 )
 from custom_components.keba_heat_pump_modbus.sensor import (
     KebaSensor,
+    KebaCopSensor,
     async_setup_entry as setup_sensors,
 )
 from custom_components.keba_heat_pump_modbus.water_heater import (
@@ -282,7 +283,14 @@ def test_select_rejects_invalid_value_map_key():
 def test_sensor_entity_native_value_and_setup():
     hass = DummyHass()
     entry = create_entry()
-    coordinator = DummyCoordinator({"sensor": 12.5}, hass=hass)
+    coordinator = DummyCoordinator(
+        {
+            "sensor": 12.5,
+            "heat_power_consumption": 200.0,
+            "electrical_power_consumption": 100.0,
+        },
+        hass=hass,
+    )
     reg = ModbusRegister(
         unique_id="sensor",
         name="Temperature",
@@ -312,8 +320,29 @@ def test_sensor_entity_native_value_and_setup():
 
     assert len(added) == 2
     entity: KebaSensor = added[0]
+    cop_entity: KebaCopSensor = added[1]
     assert entity.native_value == 12.5
     assert entity.device_info["name"] == "Heat Pump"
+    assert cop_entity.native_value == 2.0
+
+
+def test_cop_sensor_handles_missing_or_invalid_values():
+    coordinator = DummyCoordinator(
+        {
+            "heat_power_consumption": 120.0,
+            "electrical_power_consumption": 0.0,
+        }
+    )
+    entry = create_entry()
+    cop_entity = KebaCopSensor(coordinator, entry)
+
+    assert cop_entity.native_value is None
+
+    coordinator.data["electrical_power_consumption"] = 60.0
+    assert cop_entity.native_value == 2.0
+
+    coordinator.data["heat_power_consumption"] = "unknown"
+    assert cop_entity.native_value is None
 
 
 def _create_water_heater_registers():
