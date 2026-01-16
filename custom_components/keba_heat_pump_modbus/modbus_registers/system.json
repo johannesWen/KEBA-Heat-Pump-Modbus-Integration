@@ -1,6 +1,29 @@
 {
   "registers": [
     {
+      "unique_id": "operating_mode",
+      "name": "Operating Mode",
+      "register_type": "holding",
+      "address": 1500,
+      "length": 1,
+      "data_type": "int16",
+      "unit_of_measurement": null,
+      "device": "system",
+      "icon": "mdi:cog-outline",
+      "device_class": null,
+      "state_class": null,
+      "entity_category": null,
+      "enabled_default": true,
+      "entity_platform": "select",
+      "value_map": {
+        "0": "Standby",
+        "1": "Hot Water",
+        "2": "Auto Heat",
+        "3": "Auto Cool",
+        "4": "Full Auto"
+      }
+    },
+    {
       "unique_id": "exterior_temperature",
       "name": "Exterior Temperature",
       "register_type": "holding",
