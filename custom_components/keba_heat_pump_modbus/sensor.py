@@ -146,7 +146,7 @@ class KebaFlowRateSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
     _attr_native_unit_of_measurement = "L/h"
     _attr_icon = "mdi:waves"
     _attr_state_class = "measurement"
-    _attr_suggested_display_precision = 1
+    _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KebaCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
