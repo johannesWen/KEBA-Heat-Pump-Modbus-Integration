@@ -336,6 +336,8 @@ def test_cop_sensor_handles_missing_or_invalid_values():
     entry = create_entry()
     cop_entity = KebaCopSensor(coordinator, entry)
 
+    assert cop_entity.device_info["name"] == "Heat Pump"
+
     assert cop_entity.native_value is None
 
     coordinator.data["electrical_power_consumption"] = 60.0
