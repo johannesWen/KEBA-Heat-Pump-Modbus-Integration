@@ -289,6 +289,7 @@ def test_sensor_entity_native_value_and_setup():
         address=10,
         entity_platform="sensor",
         unit_of_measurement="°C",
+        precision=2,
     )
     hass.data = {
         DOMAIN: {
