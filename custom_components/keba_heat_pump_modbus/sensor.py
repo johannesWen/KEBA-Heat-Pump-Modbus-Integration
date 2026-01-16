@@ -32,6 +32,8 @@ async def async_setup_entry(
             continue
         entities.append(KebaSensor(coordinator, entry, reg))
 
+    entities.append(KebaCopSensor(coordinator, entry))
+
     async_add_entities(entities)
 
 
@@ -80,3 +82,48 @@ class KebaSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.get(self._reg.unique_id)
+
+
+class KebaCopSensor(CoordinatorEntity[KebaCoordinator], SensorEntity):
+    """Sensor for derived coefficient of performance (COP)."""
+
+    _attr_has_entity_name = True
+    _attr_name = "COP"
+    _attr_icon = "mdi:chart-line"
+    _attr_state_class = "measurement"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: KebaCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_cop"
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        device_key = "heat_pump"
+        device_name = DEVICE_NAME_MAP.get(
+            device_key, device_key.replace("_", " ").title()
+        )
+
+        return {
+            "identifiers": {(DOMAIN, f"{self._entry.entry_id}_{device_key}")},
+            "name": f"{device_name}",
+            "manufacturer": "KEBA",
+            "model": "Heat Pump (Modbus)",
+            "configuration_url": None,
+        }
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data is None:
+            return None
+
+        heating_power = self.coordinator.data.get("heat_power_consumption")
+        electrical_power = self.coordinator.data.get("electrical_power_consumption")
+
+        if not isinstance(heating_power, (int, float)):
+            return None
+        if not isinstance(electrical_power, (int, float)) or electrical_power <= 0:
+            return None
+
+        return heating_power / electrical_power
