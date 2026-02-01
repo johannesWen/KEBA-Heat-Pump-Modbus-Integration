@@ -280,6 +280,26 @@ def test_decode_registers_scale_failure_returns_raw_value():
     assert KebaModbusClient._decode_registers([5], reg) == 5
 
 
+@pytest.mark.parametrize(
+    "data_type,raw,expected",
+    [
+        ("int32", [0xFF9C], -100),
+        ("float32", [123], 123.0),
+    ],
+)
+def test_decode_registers_len_one_for_32bit_types(data_type, raw, expected):
+    reg = ModbusRegister(
+        unique_id="len1",
+        name="Len1",
+        register_type="input",
+        address=0,
+        length=1,
+        data_type=data_type,
+    )
+
+    assert KebaModbusClient._decode_registers(raw, reg) == expected
+
+
 def test_write_register_rejects_invalid_requests(monkeypatch):
     holding_reg = ModbusRegister(
         unique_id="bad",
@@ -364,3 +384,143 @@ def test_write_register_scale_error(monkeypatch):
 
     with pytest.raises(ZeroDivisionError):
         client.write_register(reg, 10)
+
+
+def test_track_write_invokes_warning_callback_once(monkeypatch):
+    calls: list[int] = []
+
+    def cb(count: int) -> None:
+        calls.append(count)
+
+    client = KebaModbusClient("localhost", 502, 1, warning_callback=cb)
+
+    times = iter([0.0, 1.0, 2.0])
+    monkeypatch.setattr(
+        "custom_components.keba_heat_pump_modbus.modbus_client.time.time",
+        lambda: next(times),
+    )
+
+    client._track_write()  # 1 write (no warning)
+    client._track_write()  # 2 writes (warning)
+    client._track_write()  # 3 writes (still warning, but only once)
+
+    assert calls == [2]
+    assert client._write_warning_active is True
+
+
+def test_track_write_resets_after_window(monkeypatch):
+    from custom_components.keba_heat_pump_modbus.const import WRITE_WARNING_WINDOW_SECONDS
+
+    client = KebaModbusClient(
+        "localhost", 502, 1, warning_callback=lambda _c: None)
+
+    # Trigger warning first.
+    times = iter([0.0, 1.0, WRITE_WARNING_WINDOW_SECONDS + 10.0])
+    monkeypatch.setattr(
+        "custom_components.keba_heat_pump_modbus.modbus_client.time.time",
+        lambda: next(times),
+    )
+
+    client._track_write()
+    client._track_write()
+    assert client._write_warning_active is True
+
+    # Jump beyond the window; old writes are pruned and warning resets.
+    client._track_write()
+    assert client._write_warning_active is False
+
+
+def test_connect_success_and_close_swallow_exceptions(monkeypatch):
+    class OkClient:
+        def __init__(self, host: str, port: int = 502):
+            self.host = host
+            self.port = port
+            self.closed = False
+
+        def connect(self):
+            return True
+
+        def close(self):
+            self.closed = True
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "custom_components.keba_heat_pump_modbus.modbus_client.ModbusTcpClient",
+        OkClient,
+    )
+
+    client = KebaModbusClient("localhost", 123, 1)
+    client.connect()
+    assert client._client is not None
+    client.close()  # should not raise
+    assert client._client is None
+
+
+def test_read_register_list_fallback_length_one():
+    reg = ModbusRegister(
+        unique_id="legacy_one",
+        name="Legacy One",
+        register_type="holding",
+        address=10,
+        length=1,
+        data_type="uint16",
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    legacy_client = LegacyClient()
+
+    result = client._read_register_list(legacy_client, reg)
+
+    assert result == [10]
+    assert legacy_client.read_calls == [10]
+
+
+def test_read_register_list_fallback_multiword_error_mid():
+    class LegacyErrorClient(LegacyClient):
+        def read_holding_registers(self, address, count=None):
+            if count is not None:
+                raise TypeError("count not supported")
+            self.read_calls.append(address)
+            if address == 11:
+                return DummyResponse([], error=True)
+            return DummyResponse([address])
+
+    reg = ModbusRegister(
+        unique_id="legacy_err",
+        name="Legacy Err",
+        register_type="holding",
+        address=10,
+        length=3,
+        data_type="uint16",
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    legacy_client = LegacyErrorClient()
+
+    result = client._read_register_list(legacy_client, reg)
+
+    assert result is None
+    assert legacy_client.read_calls == [10, 11]
+
+
+def test_read_register_list_fallback_for_input_registers():
+    class LegacyInputClient(LegacyClient):
+        def read_input_registers(self, address, count=None):
+            if count is not None:
+                raise TypeError("count not supported")
+            self.read_calls.append(("input", address))
+            return DummyResponse([address])
+
+    reg = ModbusRegister(
+        unique_id="legacy_in",
+        name="Legacy In",
+        register_type="input",
+        address=20,
+        length=2,
+        data_type="uint16",
+    )
+    client = KebaModbusClient("localhost", 502, 1)
+    legacy_client = LegacyInputClient()
+
+    result = client._read_register_list(legacy_client, reg)
+
+    assert result == [20, 21]
+    assert legacy_client.read_calls == [("input", 20), ("input", 21)]

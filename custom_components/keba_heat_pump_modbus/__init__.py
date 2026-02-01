@@ -66,13 +66,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         notification_id = f"{DOMAIN}_{entry.entry_id}_write_warning"
 
         def _schedule_notification() -> None:
-            hass.async_create_task(
-                persistent_notification.async_create(
-                    hass,
-                    message,
-                    title,
-                    notification_id=notification_id,
-                )
+            persistent_notification.async_create(
+                hass,
+                message,
+                title,
+                notification_id=notification_id,
             )
 
         hass.loop.call_soon_threadsafe(_schedule_notification)

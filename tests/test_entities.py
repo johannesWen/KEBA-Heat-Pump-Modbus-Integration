@@ -668,6 +668,9 @@ def test_climate_setup_and_properties():
     assert client.writes[1] == (mode_reg, 3)
     assert coordinator.refresh_called is True
 
+    # Simulate coordinator update after the write/refresh.
+    coordinator.data[mode_reg.unique_id] = 3
+
     coordinator.refresh_called = False
     asyncio.run(entity.async_set_hvac_mode(HVACMode.OFF))
     assert client.writes[2] == (mode_reg, 0)

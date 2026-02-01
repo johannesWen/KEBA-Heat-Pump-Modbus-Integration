@@ -5,7 +5,6 @@ from typing import Callable
 
 from homeassistant.core import HomeAssistant
 
-from .const import WRITE_DEBOUNCE_SECONDS
 from .coordinator import KebaCoordinator
 from .modbus_client import KebaModbusClient
 from .models import ModbusRegister
@@ -37,14 +36,19 @@ class DebouncedRegisterWriter:
         client: KebaModbusClient,
         reg: ModbusRegister,
         current_value: Callable[[], float | int | bool | str | None],
-        delay: float = WRITE_DEBOUNCE_SECONDS,
+        delay: float | None = None,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
         self._client = client
         self._reg = reg
         self._current_value = current_value
-        self._delay = delay
+        if delay is None:
+            # Read at runtime so tests can monkeypatch const.WRITE_DEBOUNCE_SECONDS.
+            from .const import WRITE_DEBOUNCE_SECONDS
+
+            delay = WRITE_DEBOUNCE_SECONDS
+        self._delay = float(delay)
         self._pending_task: asyncio.Task[None] | None = None
         self._pending_value: float | int | bool | str | None = None
 
@@ -57,15 +61,23 @@ class DebouncedRegisterWriter:
         if values_equal(self._current_value(), value, self._reg.precision):
             return
         self._pending_value = value
+
+        # For unit tests (often using asyncio.run) and for callers that want immediate
+        # writes, allow delay=0 to execute synchronously.
+        if self._delay <= 0:
+            await self._write_pending()
+            return
+
         if self._pending_task is not None:
             self._pending_task.cancel()
-        self._pending_task = self._hass.async_create_task(self._delayed_write())
+        create_task = getattr(self._hass, "async_create_task", None)
+        if callable(create_task):
+            self._pending_task = create_task(self._delayed_write())
+        else:
+            # Fallback for lightweight test stubs that don't implement hass.async_create_task.
+            self._pending_task = asyncio.create_task(self._delayed_write())
 
-    async def _delayed_write(self) -> None:
-        try:
-            await asyncio.sleep(self._delay)
-        except asyncio.CancelledError:
-            return
+    async def _write_pending(self) -> None:
         value = self._pending_value
         if value is None:
             return
@@ -75,3 +87,10 @@ class DebouncedRegisterWriter:
             self._client.write_register, self._reg, value
         )
         await self._coordinator.async_request_refresh()
+
+    async def _delayed_write(self) -> None:
+        try:
+            await asyncio.sleep(self._delay)
+        except asyncio.CancelledError:
+            return
+        await self._write_pending()
