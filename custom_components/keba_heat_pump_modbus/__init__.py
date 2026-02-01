@@ -59,7 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     def _notify_write_warning(count: int) -> None:
         message = (
-            "Modbus write operations exceeded the weekly threshold. "
+            "Modbus write operations exceeded the weekly threshold. Please be careful to avoid excessive writes which can wear out the device's flash memory.\n\n"
             f"Detected {count} writes in the past 7 days."
         )
         title = "KEBA heat pump Modbus write warning"
