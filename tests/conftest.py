@@ -39,6 +39,7 @@ def _create_homeassistant_stub() -> None:
     ha = types.ModuleType("homeassistant")
 
     components = types.ModuleType("homeassistant.components")
+
     class _BaseEntity:
         _attr_has_entity_name = False
 
@@ -50,23 +51,37 @@ def _create_homeassistant_stub() -> None:
         def unique_id(self):  # pragma: no cover - convenience
             return getattr(self, "_attr_unique_id", None)
 
-    binary_sensor_mod = types.ModuleType("homeassistant.components.binary_sensor")
+    binary_sensor_mod = types.ModuleType(
+        "homeassistant.components.binary_sensor")
+
     class BinarySensorEntity(_BaseEntity):
         pass
 
     number_mod = types.ModuleType("homeassistant.components.number")
+
     class NumberEntity(_BaseEntity):
         pass
 
     select_mod = types.ModuleType("homeassistant.components.select")
+
     class SelectEntity(_BaseEntity):
         pass
 
     sensor_mod = types.ModuleType("homeassistant.components.sensor")
+
     class SensorEntity(_BaseEntity):
         pass
 
-    water_heater_mod = types.ModuleType("homeassistant.components.water_heater")
+    persistent_notification_mod = types.ModuleType(
+        "homeassistant.components.persistent_notification"
+    )
+
+    def async_create(hass, message, title=None, notification_id=None):  # noqa: ANN001
+        # Tests only need this to exist; no-op.
+        return None
+
+    water_heater_mod = types.ModuleType(
+        "homeassistant.components.water_heater")
 
     climate_mod = types.ModuleType("homeassistant.components.climate")
 
@@ -124,8 +139,11 @@ def _create_homeassistant_stub() -> None:
     components.number = number_mod
     components.select = select_mod
     components.sensor = sensor_mod
+    components.persistent_notification = persistent_notification_mod
     components.water_heater = water_heater_mod
     components.climate = climate_mod
+
+    persistent_notification_mod.async_create = async_create
 
     const = types.ModuleType("homeassistant.const")
 
@@ -150,7 +168,8 @@ def _create_homeassistant_stub() -> None:
     class HomeAssistant:
         def __init__(self):
             self.data = {}
-            self.config_entries = types.SimpleNamespace(async_forward_entry_setups=lambda *args, **kwargs: None)
+            self.config_entries = types.SimpleNamespace(
+                async_forward_entry_setups=lambda *args, **kwargs: None)
 
         async def async_add_executor_job(self, func, *args, **kwargs):
             return func(*args, **kwargs)
@@ -204,13 +223,15 @@ def _create_homeassistant_stub() -> None:
     helpers = types.ModuleType("homeassistant.helpers")
 
     entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
+
     def _add_entities_callback(entities):
         return entities
 
     entity_platform.AddEntitiesCallback = type("AddEntitiesCallback", (), {})
     helpers.entity_platform = entity_platform
 
-    update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
+    update_coordinator = types.ModuleType(
+        "homeassistant.helpers.update_coordinator")
 
     class UpdateFailed(Exception):
         pass
@@ -255,6 +276,7 @@ def _create_homeassistant_stub() -> None:
     sys.modules["homeassistant.components.number"] = number_mod
     sys.modules["homeassistant.components.select"] = select_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
+    sys.modules["homeassistant.components.persistent_notification"] = persistent_notification_mod
     sys.modules["homeassistant.components.water_heater"] = water_heater_mod
     sys.modules["homeassistant.components.climate"] = climate_mod
     sys.modules["homeassistant.const"] = const
@@ -314,3 +336,12 @@ def pytest_sessionstart(session):
     _ensure_voluptuous_stub()
     _create_homeassistant_stub()
     _create_pymodbus_stub()
+
+    # Make debounced writes synchronous for unit tests.
+    try:
+        from custom_components.keba_heat_pump_modbus import const as integration_const
+
+        integration_const.WRITE_DEBOUNCE_SECONDS = 0
+    except Exception:  # noqa: BLE001
+        # If the integration cannot be imported yet for some reason, tests will surface it.
+        pass

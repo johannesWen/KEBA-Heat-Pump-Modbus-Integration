@@ -115,7 +115,12 @@ class KebaSelect(CoordinatorEntity[KebaCoordinator], SelectEntity):
                 break
 
         if raw_value is None:
-            raise ValueError(f"Invalid option '{option}' for {self._reg.unique_id}")
+            raise ValueError(
+                f"Invalid option '{option}' for {self._reg.unique_id}")
+
+        # Skip redundant writes, but only after validating the mapping for this option.
+        if self.current_option == option:
+            return
 
         await self.hass.async_add_executor_job(
             self._client.write_register, self._reg, raw_value

@@ -21,3 +21,26 @@ def test_async_load_registers_reads_default_files():
     assert registers
     assert all(isinstance(reg, ModbusRegister) for reg in registers)
     assert hass.executor_calls == 1
+
+
+def test_async_load_registers_reads_single_json_when_directory_missing(monkeypatch):
+    import io
+
+    from custom_components.keba_heat_pump_modbus import __init__ as integration
+
+    monkeypatch.setattr(integration.os.path, "isdir", lambda _p: False)
+
+    def fake_open(path, mode="r", encoding=None, **kwargs):  # noqa: ANN001
+        assert path.endswith("modbus_registers.json")
+        return io.StringIO(
+            '{"registers": [{"unique_id": "x", "name": "X", "register_type": "input", "address": 1}]}'
+        )
+
+    monkeypatch.setattr("builtins.open", fake_open)
+
+    hass = DummyHass()
+
+    registers = asyncio.run(integration._async_load_registers(hass))
+
+    assert len(registers) == 1
+    assert registers[0].unique_id == "x"

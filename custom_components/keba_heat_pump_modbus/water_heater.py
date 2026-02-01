@@ -27,6 +27,7 @@ from .const import (
 from .coordinator import KebaCoordinator
 from .modbus_client import KebaModbusClient
 from .models import ModbusRegister
+from .write_utils import DebouncedRegisterWriter, values_equal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -138,6 +139,13 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
             if target_temp_reg.native_step is not None
             else 0.5
         )
+        self._debounced_writer = DebouncedRegisterWriter(
+            hass=coordinator.hass,
+            coordinator=self.coordinator,
+            client=self._client,
+            reg=self._target_temp_reg,
+            current_value=self._current_target_temperature,
+        )
 
     @property
     def device_info(self) -> Dict[str, Any]:
@@ -168,6 +176,9 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
         value = self.coordinator.data.get(self._target_temp_reg.unique_id)
         return float(value) if value is not None else None
 
+    def _current_target_temperature(self) -> float | None:
+        return self.target_temperature
+
     @property
     def current_operation(self) -> str | None:
         if self.coordinator.data is None:
@@ -190,17 +201,24 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
         if ATTR_TEMPERATURE not in kwargs:
             return
         temperature = float(kwargs[ATTR_TEMPERATURE])
-        await self.hass.async_add_executor_job(
-            self._client.write_register, self._target_temp_reg, temperature
-        )
-        await self.coordinator.async_request_refresh()
+        if values_equal(
+            self.target_temperature, temperature, self._target_temp_reg.precision
+        ):
+            return
+        await self._debounced_writer.schedule(temperature)
 
     async def async_set_operation_mode(self, operation_mode: str) -> None:
         normalized = operation_mode.lower()
         if normalized not in _STRING_TO_VALUE:
             raise ValueError(f"Unsupported operation mode: {operation_mode}")
         mode_value = _STRING_TO_VALUE[normalized]
+        current_mode = self.current_operation
+        if current_mode is not None and normalized == current_mode.lower():
+            return
         await self.hass.async_add_executor_job(
             self._client.write_register, self._mode_reg, mode_value
         )
         await self.coordinator.async_request_refresh()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._debounced_writer.cancel()
