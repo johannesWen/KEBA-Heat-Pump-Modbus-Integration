@@ -64,15 +64,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         title = "KEBA heat pump Modbus write warning"
         notification_id = f"{DOMAIN}_{entry.entry_id}_write_warning"
-        hass.loop.call_soon_threadsafe(
-            hass.async_create_task,
-            persistent_notification.async_create(
-                hass,
-                message,
-                title,
-                notification_id=notification_id,
-            ),
-        )
+
+        def _schedule_notification() -> None:
+            hass.async_create_task(
+                persistent_notification.async_create(
+                    hass,
+                    message,
+                    title,
+                    notification_id=notification_id,
+                )
+            )
+
+        hass.loop.call_soon_threadsafe(_schedule_notification)
 
     client = KebaModbusClient(
         host, port, unit_id, warning_callback=_notify_write_warning
