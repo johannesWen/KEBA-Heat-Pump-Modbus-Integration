@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import struct
+import time
+from collections import deque
 from typing import Dict, List
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
+from .const import WRITE_WARNING_THRESHOLD, WRITE_WARNING_WINDOW_SECONDS
 from .models import ModbusRegister
 
 _LOGGER = logging.getLogger(__name__)
@@ -20,6 +23,8 @@ class KebaModbusClient:
         self._port = port
         self._unit_id = unit_id  # note: may not be used by your pymodbus version
         self._client: ModbusTcpClient | None = None
+        self._write_timestamps: deque[float] = deque()
+        self._write_warning_active = False
 
     def connect(self) -> None:
         if self._client is None:
@@ -186,6 +191,25 @@ class KebaModbusClient:
             raise ModbusException(
                 f"Error writing register {reg.name} ({reg.address}): {resp}"
             )
+        self._track_write()
+
+    def _track_write(self) -> None:
+        now = time.time()
+        window_start = now - WRITE_WARNING_WINDOW_SECONDS
+        while self._write_timestamps and self._write_timestamps[0] < window_start:
+            self._write_timestamps.popleft()
+        self._write_timestamps.append(now)
+        write_count = len(self._write_timestamps)
+        if write_count > WRITE_WARNING_THRESHOLD:
+            if not self._write_warning_active:
+                _LOGGER.warning(
+                    "Modbus writes exceeded %s in the past week: %s writes",
+                    WRITE_WARNING_THRESHOLD,
+                    write_count,
+                )
+                self._write_warning_active = True
+        else:
+            self._write_warning_active = False
 
     # ---------------------------------------------------------------------
     #  Decoding

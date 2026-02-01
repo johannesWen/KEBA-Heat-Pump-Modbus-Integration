@@ -103,6 +103,9 @@ class KebaSelect(CoordinatorEntity[KebaCoordinator], SelectEntity):
         if not self._reg.value_map:
             raise ValueError(f"No value_map defined for {self._reg.unique_id}")
 
+        if self.current_option == option:
+            return
+
         raw_value: int | None = None
         for key, val in self._reg.value_map.items():
             if val == option:

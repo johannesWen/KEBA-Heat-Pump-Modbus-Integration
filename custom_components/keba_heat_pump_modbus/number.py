@@ -19,6 +19,7 @@ from .const import (
 from .coordinator import KebaCoordinator
 from .modbus_client import KebaModbusClient
 from .models import ModbusRegister
+from .write_utils import DebouncedRegisterWriter, values_equal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,6 +72,13 @@ class KebaControl(CoordinatorEntity[KebaCoordinator], NumberEntity):
         self._attr_native_step = reg.native_step if reg.native_step else 0.1
         self._attr_native_min_value = reg.native_min_value
         self._attr_native_max_value = reg.native_max_value
+        self._debounced_writer = DebouncedRegisterWriter(
+            hass=coordinator.hass,
+            coordinator=self.coordinator,
+            client=self._client,
+            reg=self._reg,
+            current_value=self._current_value,
+        )
 
     @property
     def device_info(self) -> Dict[str, Any]:
@@ -93,8 +101,13 @@ class KebaControl(CoordinatorEntity[KebaCoordinator], NumberEntity):
             return None
         return self.coordinator.data.get(self._reg.unique_id)
 
+    def _current_value(self) -> Any:
+        return self.native_value
+
     async def async_set_native_value(self, value: float) -> None:
-        await self.hass.async_add_executor_job(
-            self._client.write_register, self._reg, value
-        )
-        await self.coordinator.async_request_refresh()
+        if values_equal(self.native_value, value, self._reg.precision):
+            return
+        await self._debounced_writer.schedule(value)
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._debounced_writer.cancel()

@@ -18,6 +18,7 @@ from .const import DATA_CLIENT, DATA_COORDINATOR, DATA_REGISTERS, DEVICE_NAME_MA
 from .coordinator import KebaCoordinator
 from .modbus_client import KebaModbusClient
 from .models import ModbusRegister
+from .write_utils import DebouncedRegisterWriter, values_equal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -153,6 +154,13 @@ class KebaHeatingCircuitClimate(CoordinatorEntity[KebaCoordinator], ClimateEntit
                     if preset.lower() != "standby":
                         self._heat_mode_value = value
                         break
+        self._debounced_writer = DebouncedRegisterWriter(
+            hass=coordinator.hass,
+            coordinator=self.coordinator,
+            client=self._client,
+            reg=self._target_temp_reg,
+            current_value=self._current_target_temperature,
+        )
 
     @property
     def device_info(self) -> Dict[str, Any]:
@@ -181,6 +189,9 @@ class KebaHeatingCircuitClimate(CoordinatorEntity[KebaCoordinator], ClimateEntit
             return None
         value = self.coordinator.data.get(self._target_temp_reg.unique_id)
         return float(value) if value is not None else None
+
+    def _current_target_temperature(self) -> float | None:
+        return self.target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode | None:
@@ -217,16 +228,19 @@ class KebaHeatingCircuitClimate(CoordinatorEntity[KebaCoordinator], ClimateEntit
         if ATTR_TEMPERATURE not in kwargs:
             return
         temperature = float(kwargs[ATTR_TEMPERATURE])
-        await self.hass.async_add_executor_job(
-            self._client.write_register, self._target_temp_reg, temperature
-        )
-        await self.coordinator.async_request_refresh()
+        if values_equal(
+            self.target_temperature, temperature, self._target_temp_reg.precision
+        ):
+            return
+        await self._debounced_writer.schedule(temperature)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         normalized = preset_mode.lower()
         if normalized not in self._preset_to_value:
             raise ValueError(f"Unsupported preset mode: {preset_mode}")
         mode_value = self._preset_to_value[normalized]
+        if values_equal(self._raw_mode_value(), mode_value, None):
+            return
         await self.hass.async_add_executor_job(
             self._client.write_register, self._mode_reg, mode_value
         )
@@ -244,7 +258,12 @@ class KebaHeatingCircuitClimate(CoordinatorEntity[KebaCoordinator], ClimateEntit
         else:
             raise ValueError(f"Unsupported HVAC mode: {hvac_mode}")
 
+        if values_equal(self._raw_mode_value(), mode_value, None):
+            return
         await self.hass.async_add_executor_job(
             self._client.write_register, self._mode_reg, mode_value
         )
         await self.coordinator.async_request_refresh()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._debounced_writer.cancel()
