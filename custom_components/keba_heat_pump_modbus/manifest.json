@@ -6,14 +6,14 @@
   ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://example.com/your-repo-or-docs",
+  "documentation": "https://github.com/johannesWen/KEBA-Heat-Pump-Modbus-Integration",
   "iot_class": "local_polling",
-  "issue_tracker": "https://example.com/your-issues",
+  "issue_tracker": "https://github.com/johannesWen/KEBA-Heat-Pump-Modbus-Integration/issues",
   "loggers": [
     "custom_components.keba_heat_pump_modbus"
   ],
   "requirements": [
     "pymodbus>=3.10.0"
   ],
-  "version": "1.2.0"
+  "version": "1.3.0"
 }
