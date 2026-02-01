@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from pymodbus.exceptions import ModbusException
@@ -146,7 +148,7 @@ def test_read_register_list_falls_back_without_count():
     client = KebaModbusClient("localhost", 502, 1)
     legacy_client = LegacyClient()
 
-    result = client._read_register_list(legacy_client, reg)
+    result = client._read_register_list(cast(Any, legacy_client), reg)
 
     assert result == [10, 11]
     assert legacy_client.read_calls == [10, 11]
@@ -164,7 +166,7 @@ def test_read_register_list_handles_error_response():
     responses = {("holding", 5, 1): DummyResponse([], error=True)}
     reader = RecordingClient(responses)
 
-    result = client._read_register_list(reader, reg)
+    result = client._read_register_list(cast(Any, reader), reg)
 
     assert result is None
 
@@ -394,6 +396,12 @@ def test_track_write_invokes_warning_callback_once(monkeypatch):
 
     client = KebaModbusClient("localhost", 502, 1, warning_callback=cb)
 
+    # Keep the test stable even if the default threshold changes.
+    monkeypatch.setattr(
+        "custom_components.keba_heat_pump_modbus.modbus_client.WRITE_WARNING_THRESHOLD",
+        1,
+    )
+
     times = iter([0.0, 1.0, 2.0])
     monkeypatch.setattr(
         "custom_components.keba_heat_pump_modbus.modbus_client.time.time",
@@ -413,6 +421,12 @@ def test_track_write_resets_after_window(monkeypatch):
 
     client = KebaModbusClient(
         "localhost", 502, 1, warning_callback=lambda _c: None)
+
+    # Keep the test stable even if the default threshold changes.
+    monkeypatch.setattr(
+        "custom_components.keba_heat_pump_modbus.modbus_client.WRITE_WARNING_THRESHOLD",
+        1,
+    )
 
     # Trigger warning first.
     times = iter([0.0, 1.0, WRITE_WARNING_WINDOW_SECONDS + 10.0])
@@ -468,7 +482,7 @@ def test_read_register_list_fallback_length_one():
     client = KebaModbusClient("localhost", 502, 1)
     legacy_client = LegacyClient()
 
-    result = client._read_register_list(legacy_client, reg)
+    result = client._read_register_list(cast(Any, legacy_client), reg)
 
     assert result == [10]
     assert legacy_client.read_calls == [10]
@@ -495,7 +509,7 @@ def test_read_register_list_fallback_multiword_error_mid():
     client = KebaModbusClient("localhost", 502, 1)
     legacy_client = LegacyErrorClient()
 
-    result = client._read_register_list(legacy_client, reg)
+    result = client._read_register_list(cast(Any, legacy_client), reg)
 
     assert result is None
     assert legacy_client.read_calls == [10, 11]
@@ -520,7 +534,7 @@ def test_read_register_list_fallback_for_input_registers():
     client = KebaModbusClient("localhost", 502, 1)
     legacy_client = LegacyInputClient()
 
-    result = client._read_register_list(legacy_client, reg)
+    result = client._read_register_list(cast(Any, legacy_client), reg)
 
     assert result == [20, 21]
     assert legacy_client.read_calls == [("input", 20), ("input", 21)]

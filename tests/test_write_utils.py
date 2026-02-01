@@ -18,7 +18,7 @@ def test_values_equal_handles_types_and_precision():
     assert values_equal(False, 0, None) is True
     assert values_equal(False, 1, None) is False
 
-    assert values_equal(1.234, 1.235, 2) is False
+    assert values_equal(1.234, 1.236, 2) is True
     assert values_equal(1.234, 1.2339, 2) is True
 
     assert values_equal(5.0, 5, None) is True

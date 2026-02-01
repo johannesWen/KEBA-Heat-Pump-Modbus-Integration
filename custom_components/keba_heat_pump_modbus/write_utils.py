@@ -1,4 +1,5 @@
 from __future__ import annotations
+from math import isclose
 
 import asyncio
 from typing import Callable
@@ -15,16 +16,29 @@ def values_equal(
     new: float | int | bool | str,
     precision: int | None,
 ) -> bool:
+
     if current is None:
         return False
+
     if isinstance(current, str) or isinstance(new, str):
         return str(current) == str(new)
+
     if isinstance(current, bool) or isinstance(new, bool):
         return bool(current) == bool(new)
+
     if isinstance(current, (int, float)) and isinstance(new, (int, float)):
+        current_f = float(current)
+        new_f = float(new)
+
+        # Use epsilon-based comparison (absolute tolerance).
+        # If precision is known, accept values within half of the last digit.
         if precision is not None:
-            return round(float(current), precision) == round(float(new), precision)
-        return float(current) == float(new)
+            abs_tol = 0.5 * (10 ** (-precision))
+        else:
+            abs_tol = 1e-9
+
+        return isclose(current_f, new_f, rel_tol=0.0, abs_tol=abs_tol)
+
     return current == new
 
 
