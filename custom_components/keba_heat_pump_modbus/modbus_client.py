@@ -4,7 +4,7 @@ import logging
 import struct
 import time
 from collections import deque
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
@@ -18,13 +18,20 @@ _LOGGER = logging.getLogger(__name__)
 class KebaModbusClient:
     """Thin wrapper around ModbusTcpClient."""
 
-    def __init__(self, host: str, port: int, unit_id: int) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        unit_id: int,
+        warning_callback: Callable[[int], None] | None = None,
+    ) -> None:
         self._host = host
         self._port = port
         self._unit_id = unit_id  # note: may not be used by your pymodbus version
         self._client: ModbusTcpClient | None = None
         self._write_timestamps: deque[float] = deque()
         self._write_warning_active = False
+        self._warning_callback = warning_callback
 
     def connect(self) -> None:
         if self._client is None:
@@ -207,6 +214,8 @@ class KebaModbusClient:
                     WRITE_WARNING_THRESHOLD,
                     write_count,
                 )
+                if self._warning_callback is not None:
+                    self._warning_callback(write_count)
                 self._write_warning_active = True
         else:
             self._write_warning_active = False

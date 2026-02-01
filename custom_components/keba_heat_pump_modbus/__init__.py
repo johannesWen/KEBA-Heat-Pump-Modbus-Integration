@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Any, Dict, List
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
@@ -56,7 +57,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     registers = _filter_circuit_registers(registers, num_circuits)
 
-    client = KebaModbusClient(host, port, unit_id)
+    def _notify_write_warning(count: int) -> None:
+        message = (
+            "Modbus write operations exceeded the weekly threshold. "
+            f"Detected {count} writes in the past 7 days."
+        )
+        title = "KEBA heat pump Modbus write warning"
+        notification_id = f"{DOMAIN}_{entry.entry_id}_write_warning"
+        hass.loop.call_soon_threadsafe(
+            hass.async_create_task,
+            persistent_notification.async_create(
+                hass,
+                message,
+                title,
+                notification_id=notification_id,
+            ),
+        )
+
+    client = KebaModbusClient(
+        host, port, unit_id, warning_callback=_notify_write_warning
+    )
 
     coordinator = KebaCoordinator(
         hass=hass,
