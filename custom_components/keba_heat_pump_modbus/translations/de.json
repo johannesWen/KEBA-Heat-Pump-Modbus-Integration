@@ -1,0 +1,40 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "KEBA Wärmepumpe",
+                "description": "Stelle die Modbus-Verbindungsdaten für deine KEBA Wärmepumpe ein.",
+                "data": {
+                    "host": "IP-Adresse / Hostname",
+                    "port": "Port",
+                    "unit_id": "Modbus Unit-ID",
+                    "scan_interval": "Aktualisierungsintervall (Sekunden)",
+                    "heat_circuits_used": "Anzahl Heizkreise (1\u20134)"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Optionen",
+                "data": {
+                    "scan_interval": "Aktualisierungsintervall (Sekunden)",
+                    "heat_circuits_used": "Anzahl Heizkreise (1\u20134)"
+                }
+            }
+        }
+    },
+    "entity": {
+        "water_heater": {
+            "hot_water_tank": {
+                "state": {
+                    "eco": "Auto",
+                    "heat_pump": "Ein",
+                    "off": "Aus",
+                    "performance": "Aufheizen"
+                }
+            }
+        }
+    }
+}

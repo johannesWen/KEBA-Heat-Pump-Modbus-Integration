@@ -42,7 +42,7 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 2. Restart Home Assistant.
 3. Add the integration via **Settings → Devices & Services → Add Integration** and provide the connection details when prompted.
 
-## Configuration options
+## Configuration options 
 
 - **Host**: IP address or hostname of the KEBA heat pump controller.
 - **Port**: Modbus TCP port (defaults to `502`).
