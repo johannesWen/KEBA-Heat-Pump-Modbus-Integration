@@ -24,6 +24,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           commitish: main
+          prerelease: ${{ contains(github.ref, '-') }}
 
       - name: Checkout repository
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
