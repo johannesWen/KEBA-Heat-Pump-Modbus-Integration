@@ -10,21 +10,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 jobs:
-  update_release_draft:
+  # ── Stable release (tags without suffix, e.g. v1.4.0) ──
+  update_full_release_draft:
+    if: ${{ !contains(github.ref_name, '-') }}
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
-
     steps:
-      - id: release_drafter
-        uses: release-drafter/release-drafter@139054aeaa9adc52ab36ddf67437541f039b88e2 # v7
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          commitish: main
-          prerelease: ${{ contains(github.ref, '-') }}
 
       - name: Checkout repository
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -36,13 +32,55 @@ jobs:
           cd custom_components/keba_heat_pump_modbus
           zip -r ${{ github.workspace }}/keba_heat_pump_modbus.zip ./
 
-      - name: Upload release asset
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1
+      - id: release_drafter
+        uses: release-drafter/release-drafter@139054aeaa9adc52ab36ddf67437541f039b88e2 # v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.release_drafter.outputs.upload_url }}
-          asset_path: ${{ github.workspace }}/keba_heat_pump_modbus.zip
-          asset_name: keba_heat_pump_modbus.zip
-          asset_content_type: application/zip
+          commitish: main
+          prerelease: false
+
+      - name: Upload release asset (replace if exists)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.release_drafter.outputs.tag_name }}" \
+            ${{ github.workspace }}/keba_heat_pump_modbus.zip \
+            --clobber
+
+  # ── Pre-release (tags with -rc, -beta, -alpha suffix, e.g. v1.4.0-rc.1) ──
+  update_pre_release_draft:
+    if: ${{ contains(github.ref_name, '-') }}
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+
+      - name: Create Home Assistant release archive
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd custom_components/keba_heat_pump_modbus
+          zip -r ${{ github.workspace }}/keba_heat_pump_modbus.zip ./
+
+      - id: release_drafter
+        uses: release-drafter/release-drafter@139054aeaa9adc52ab36ddf67437541f039b88e2 # v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          commitish: main
+          prerelease: true
+          prerelease-identifier: "rc"
+
+      - name: Upload release asset (replace if exists)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.release_drafter.outputs.tag_name }}" \
+            ${{ github.workspace }}/keba_heat_pump_modbus.zip \
+            --clobber
