@@ -35,10 +35,18 @@ autolabeler:
   - label: 'type-bug'
     branch:
       - '/fix\/.+/'
+      - '/bugfix\/.+/'
     title:
       - '/fix/i'
-  - label: 'type-enhancement'
+  - label: 'version-patch'
+    branch:
+      - '/fix\/.+/'
+      - '/bugfix\/.+/'
+      - '/feat\/.+/'
+      - '/feature\/.+/'
+  - label: 'type-feature'
     branch:
       - '/feature\/.+/'
+      - '/feat\/.+/'
     body:
       - '/JIRA-[0-9]{1,4}/'
