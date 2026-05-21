@@ -92,12 +92,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            # Only scan interval right now
             return self.async_create_entry(
                 title="",
                 data=user_input,
             )
 
+        current_host = self._entry.options.get(
+            CONF_HOST,
+            self._entry.data.get(CONF_HOST),
+        )
+        current_port = self._entry.options.get(
+            CONF_PORT,
+            self._entry.data.get(CONF_PORT, DEFAULT_PORT),
+        )
+        current_unit_id = self._entry.options.get(
+            CONF_UNIT_ID,
+            self._entry.data.get(CONF_UNIT_ID, DEFAULT_UNIT_ID),
+        )
         current_scan = self._entry.options.get(
             CONF_SCAN_INTERVAL,
             self._entry.data.get(
@@ -114,6 +125,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         data_schema = vol.Schema(
             {
+                vol.Required(CONF_HOST, default=current_host): str,
+                vol.Optional(CONF_PORT, default=current_port): int,
+                vol.Optional(
+                    CONF_UNIT_ID, default=current_unit_id
+                ): int,
                 vol.Required(
                     CONF_SCAN_INTERVAL, default=current_scan
                 ): int,

@@ -40,9 +40,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up KEBA Heat Pump Modbus from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    host = entry.data[CONF_HOST]
-    port = entry.data[CONF_PORT]
-    unit_id = entry.data[CONF_UNIT_ID]
+    host = entry.options.get(CONF_HOST, entry.data[CONF_HOST])
+    port = entry.options.get(CONF_PORT, entry.data[CONF_PORT])
+    unit_id = entry.options.get(CONF_UNIT_ID, entry.data[CONF_UNIT_ID])
     scan_interval = entry.options.get(
         CONF_SCAN_INTERVAL,
         entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),

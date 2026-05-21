@@ -1,4 +1,33 @@
 {
+    "config": {
+        "step": {
+            "user": {
+                "title": "KEBA Heat Pump",
+                "description": "Configure Modbus connection settings for your KEBA heat pump.",
+                "data": {
+                    "host": "IP Address / Hostname",
+                    "port": "Port",
+                    "unit_id": "Modbus Unit ID",
+                    "scan_interval": "Scan interval (seconds)",
+                    "heat_circuits_used": "Number of heating circuits (1\u20134)"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Options",
+                "data": {
+                    "host": "IP Address / Hostname",
+                    "port": "Port",
+                    "unit_id": "Modbus Unit ID",
+                    "scan_interval": "Scan interval (seconds)",
+                    "heat_circuits_used": "Number of heating circuits (1\u20134)"
+                }
+            }
+        }
+    },
     "entity": {
         "water_heater": {
             "hot_water_tank": {
