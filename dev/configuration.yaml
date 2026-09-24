@@ -1,0 +1,25 @@
+# Dev configuration for testing the KEBA Heat Pump Modbus integration
+# and its bundled Lovelace card against a simulated Modbus TCP server.
+
+homeassistant:
+  name: HA Dev KEBA
+  unit_system: metric
+  time_zone: Europe/Berlin
+  currency: EUR
+
+# Enable default_config for a usable UI (includes the frontend integration
+# that the card relies on to auto-load the bundled JS module).
+default_config:
+
+# Use YAML mode for Lovelace so we can pre-configure the dashboard card.
+# The card is auto-registered by the integration via add_extra_js_url, so
+# no manual `resources:` entry is needed.
+lovelace:
+  mode: yaml
+
+# -------------------------------------------------------------
+# Required include files
+# -------------------------------------------------------------
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
