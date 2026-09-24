@@ -1,12 +1,12 @@
 {
   "domain": "keba_heat_pump_modbus",
   "name": "KEBA Heat Pump Modbus",
+  "after_dependencies": ["http", "frontend"],
   "codeowners": [
     "@johannesWen"
   ],
   "config_flow": true,
   "dependencies": [],
-  "after_dependencies": ["http", "frontend"],
   "documentation": "https://github.com/johannesWen/KEBA-Heat-Pump-Modbus-Integration",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/johannesWen/KEBA-Heat-Pump-Modbus-Integration/issues",
