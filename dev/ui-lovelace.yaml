@@ -1,0 +1,36 @@
+title: KEBA Heat Pump Dev
+theme: default
+views:
+  - title: KEBA Heat Pump
+    path: keba
+    icon: mdi:heat-pump
+    cards:
+      - type: custom:keba-heat-pump-modbus-card
+        entity_prefix: keba_heat_pump_modbus
+        title: KEBA Heat Pump
+
+      - type: entities
+        title: Heat Pump Status
+        show_header_toggle: false
+        entities:
+          - entity: sensor.keba_heat_pump_modbus_heat_pump_state
+            name: State
+          - entity: sensor.keba_heat_pump_modbus_flow_temperature
+            name: Flow Temperature
+          - entity: sensor.keba_heat_pump_modbus_electrical_power_consumption
+            name: Power Consumption
+          - entity: sensor.keba_heat_pump_modbus_source_in_temperature
+            name: Source In
+          - entity: sensor.keba_heat_pump_modbus_source_out_temperature
+            name: Source Out
+
+      - type: entities
+        title: Hot Water
+        show_header_toggle: false
+        entities:
+          - entity: sensor.keba_heat_pump_modbus_top_temperature_dhw_tank1
+            name: Top Temperature
+          - entity: number.keba_heat_pump_modbus_top_set_temperature_dhw_tank1
+            name: Top Set Temperature
+          - entity: select.keba_heat_pump_modbus_operating_mode_dhw_tank1
+            name: Operating Mode

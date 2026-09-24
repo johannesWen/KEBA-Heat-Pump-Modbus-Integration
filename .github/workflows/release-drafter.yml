@@ -26,11 +26,28 @@ jobs:
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
 
-      - name: Create Home Assistant release archive
+      - name: Set up Node
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend card
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: |
-          cd custom_components/keba_heat_pump_modbus
-          zip -r ${{ github.workspace }}/keba_heat_pump_modbus.zip ./
+          npm ci
+          npm run build
+        working-directory: frontend
+
+      - name: Create and validate Home Assistant release archive
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          python3 .github/scripts/package_release.py \
+            --tag "${TAG}" \
+            --archive "${GITHUB_WORKSPACE}/keba_heat_pump_modbus.zip"
 
       - id: release_drafter
         uses: release-drafter/release-drafter@139054aeaa9adc52ab36ddf67437541f039b88e2 # v7
@@ -61,11 +78,28 @@ jobs:
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
 
-      - name: Create Home Assistant release archive
+      - name: Set up Node
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend card
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: |
-          cd custom_components/keba_heat_pump_modbus
-          zip -r ${{ github.workspace }}/keba_heat_pump_modbus.zip ./
+          npm ci
+          npm run build
+        working-directory: frontend
+
+      - name: Create and validate Home Assistant release archive
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          python3 .github/scripts/package_release.py \
+            --tag "${TAG}" \
+            --archive "${GITHUB_WORKSPACE}/keba_heat_pump_modbus.zip"
 
       - id: release_drafter
         uses: release-drafter/release-drafter@139054aeaa9adc52ab36ddf67437541f039b88e2 # v7

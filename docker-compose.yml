@@ -1,0 +1,36 @@
+services:
+  modbus-simulator:
+    build:
+      context: ./dev/modbus_simulator
+      dockerfile: Dockerfile
+    container_name: keba-modbus-simulator
+    ports:
+      # Host port 5020 avoids the privileged port range;
+      # Home Assistant reaches the simulator at modbus-simulator:502.
+      - "5020:502"
+    environment:
+      - MODBUS_HOST=0.0.0.0
+      - MODBUS_PORT=502
+    restart: unless-stopped
+
+  homeassistant:
+    container_name: ha-dev-keba
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    depends_on:
+      - modbus-simulator
+    ports:
+      - "8123:8123"
+    volumes:
+      # Mount the integration under development (includes the built card
+      # under custom_components/keba_heat_pump_modbus/static/ produced by
+      # `npm run build` in frontend/).
+      - ./custom_components/keba_heat_pump_modbus:/config/custom_components/keba_heat_pump_modbus
+      # Mount dev HA configuration with the simulated heat pump.
+      - ./dev/configuration.yaml:/config/configuration.yaml
+      - ./dev/ui-lovelace.yaml:/config/ui-lovelace.yaml
+      - ./dev/automations.yaml:/config/automations.yaml
+      - ./dev/scripts.yaml:/config/scripts.yaml
+      - ./dev/scenes.yaml:/config/scenes.yaml
+    environment:
+      - TZ=Europe/Berlin
