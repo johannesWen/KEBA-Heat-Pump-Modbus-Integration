@@ -31,6 +31,11 @@ DATA_COORDINATOR = "coordinator"
 DATA_REGISTERS = "registers"
 DATA_CLIENT = "client"
 
+# --- Bundled Lovelace card ---
+CARD_FILE_NAME = "keba-heat-pump-modbus-card.js"
+CARD_URL_PATH = f"/api/{DOMAIN}/{CARD_FILE_NAME}"
+CARD_REGISTERED_KEY = "card_registered"
+
 PLATFORMS = [
     Platform.SENSOR,
     Platform.BINARY_SENSOR,

@@ -70,6 +70,7 @@ class KebaControl(CoordinatorEntity[KebaCoordinator], NumberEntity):
         self._attr_entity_category = reg.entity_category
         self._attr_entity_registry_enabled_default = reg.enabled_default
         self._attr_native_step = reg.native_step if reg.native_step else 0.1
+        self._attr_extra_state_attributes = {"keba_key": reg.unique_id}
         self._attr_native_min_value = reg.native_min_value
         self._attr_native_max_value = reg.native_max_value
         self._debounced_writer = DebouncedRegisterWriter(

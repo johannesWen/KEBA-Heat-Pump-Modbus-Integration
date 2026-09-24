@@ -75,6 +75,7 @@ class KebaSelect(CoordinatorEntity[KebaCoordinator], SelectEntity):
         self._attr_entity_category = reg.entity_category
         self._attr_entity_registry_enabled_default = reg.enabled_default
         self._attr_options = self._options
+        self._attr_extra_state_attributes = {"keba_key": reg.unique_id}
 
     @property
     def device_info(self) -> Dict[str, Any]:

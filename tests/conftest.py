@@ -80,6 +80,23 @@ def _create_homeassistant_stub() -> None:
         # Tests only need this to exist; no-op.
         return None
 
+    http_mod = types.ModuleType("homeassistant.components.http")
+
+    class StaticPathConfig:
+        def __init__(self, url_path, path, cache_headers=True):
+            self.url_path = url_path
+            self.path = path
+            self.cache_headers = cache_headers
+
+    http_mod.StaticPathConfig = StaticPathConfig
+
+    frontend_mod = types.ModuleType("homeassistant.components.frontend")
+
+    def add_extra_js_url(_hass, _url):  # noqa: ANN001
+        pass
+
+    frontend_mod.add_extra_js_url = add_extra_js_url
+
     water_heater_mod = types.ModuleType(
         "homeassistant.components.water_heater")
 
@@ -140,6 +157,8 @@ def _create_homeassistant_stub() -> None:
     components.select = select_mod
     components.sensor = sensor_mod
     components.persistent_notification = persistent_notification_mod
+    components.http = http_mod
+    components.frontend = frontend_mod
     components.water_heater = water_heater_mod
     components.climate = climate_mod
 
@@ -277,6 +296,8 @@ def _create_homeassistant_stub() -> None:
     sys.modules["homeassistant.components.select"] = select_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
     sys.modules["homeassistant.components.persistent_notification"] = persistent_notification_mod
+    sys.modules["homeassistant.components.http"] = http_mod
+    sys.modules["homeassistant.components.frontend"] = frontend_mod
     sys.modules["homeassistant.components.water_heater"] = water_heater_mod
     sys.modules["homeassistant.components.climate"] = climate_mod
     sys.modules["homeassistant.const"] = const

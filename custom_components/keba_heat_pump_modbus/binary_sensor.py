@@ -51,6 +51,7 @@ class KebaBinarySensor(CoordinatorEntity[KebaCoordinator], BinarySensorEntity):
         self._attr_device_class = reg.device_class
         self._attr_entity_category = reg.entity_category
         self._attr_entity_registry_enabled_default = reg.enabled_default
+        self._attr_extra_state_attributes = {"keba_key": reg.unique_id}
 
     @property
     def device_info(self) -> Dict[str, Any]:

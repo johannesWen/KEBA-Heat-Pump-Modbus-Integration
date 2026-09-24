@@ -123,6 +123,7 @@ class KebaWaterHeater(CoordinatorEntity[KebaCoordinator], WaterHeaterEntity):
         self._attr_name = None
         self._attr_icon = "mdi:water-boiler"
         self._attr_translation_key = "hot_water_tank"
+        self._attr_extra_state_attributes = {"keba_key": f"{mode_reg.unique_id}_water_heater"}
 
         self._attr_min_temp = (
             target_temp_reg.native_min_value
