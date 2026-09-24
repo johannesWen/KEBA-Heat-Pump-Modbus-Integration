@@ -1,0 +1,28 @@
+{
+  "name": "keba-heat-pump-modbus-card",
+  "version": "1.0.0",
+  "description": "Home Assistant dashboard card for KEBA Heat Pump Modbus, bundled with the integration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c --watch",
+    "dev": "rollup -c --watch"
+  },
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "keba",
+    "heat-pump",
+    "modbus"
+  ],
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^1.0.0",
+    "rollup": "^4.62.2"
+  },
+  "dependencies": {
+    "lit": "^3.3.3"
+  }
+}

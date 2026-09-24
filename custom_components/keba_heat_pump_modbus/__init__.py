@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 from homeassistant.components import persistent_notification
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    CARD_FILE_NAME,
+    CARD_REGISTERED_KEY,
+    CARD_URL_PATH,
     CONF_HOST,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
@@ -32,8 +39,67 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up via YAML is not supported; config flow only."""
+    """Set up the KEBA Heat Pump Modbus integration.
+
+    Registers the bundled Lovelace card once per HA boot, independent of
+    any config entry. This lets users add the card to a dashboard before
+    they have completed the integration's config flow.
+    """
+    hass.data.setdefault(DOMAIN, {})
+    await _async_register_card(hass)
     return True
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Register and auto-load the bundled Lovelace card.
+
+    The card is built from ``frontend/`` at release time and shipped inside
+    the integration directory under ``static/``. HACS installs it together
+    with the Python code, so users do not need a separate Lovelace resource
+    entry. Registration is idempotent and only runs once per HA boot.
+    """
+    if hass.data[DOMAIN].get(CARD_REGISTERED_KEY):
+        return
+
+    card_path = Path(__file__).parent / "static" / CARD_FILE_NAME
+    if not card_path.is_file():
+        _LOGGER.warning(
+            "Bundled Lovelace card not found at %s; the card will not be "
+            "auto-loaded. Build it with `npm run build` in the frontend/ "
+            "directory. The integration itself remains functional.",
+            card_path,
+        )
+        return
+
+    # Companion apps cache static assets aggressively. Use a content hash
+    # as a cache-busting query parameter so updates are picked up without
+    # clearing the app cache manually.
+    card_url = CARD_URL_PATH
+    try:
+        digest = hashlib.sha256(card_path.read_bytes()).hexdigest()[:12]
+        card_url = f"{CARD_URL_PATH}?v={digest}"
+    except OSError:
+        _LOGGER.debug(
+            "Could not hash the bundled card for cache-busting; "
+            "serving the card at its unversioned URL.",
+            exc_info=True,
+        )
+
+    try:
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL_PATH, str(card_path), cache_headers=True)]
+        )
+        add_extra_js_url(hass, card_url)
+    except KeyError:
+        _LOGGER.warning(
+            "Frontend integration is not loaded; the bundled Lovelace card "
+            "will not be auto-loaded. Enable the frontend integration to use "
+            "the card."
+        )
+        return
+
+    hass.data[DOMAIN][CARD_REGISTERED_KEY] = True
+    _LOGGER.info("Bundled Lovelace card registered at %s", card_url)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -96,6 +162,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Register the bundled card (idempotent: skips if already registered).
+    await _async_register_card(hass)
 
     return True
 

@@ -50,6 +50,65 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 - **Scan interval**: How often (in seconds) the integration polls registers; configurable during setup and via options.
 - **heat_circuits_used**: Number of heating circuits your system has (1-4).
 
+## Dashboard Card
+
+This integration ships a bundled Lovelace card for quick access to the most common heat pump settings. The card source lives under [`frontend/`](frontend) and is built into `custom_components/keba_heat_pump_modbus/static/` at release time.
+
+Once the integration is set up, the card is **auto-registered** with Home Assistant — no manual Lovelace `resources:` entry is required.
+
+Add the card from the Lovelace UI (**Add Card** → search for **KEBA Heat Pump Modbus**) or configure it directly:
+
+```yaml
+type: custom:keba-heat-pump-modbus-card
+title: KEBA Heat Pump
+entity_prefix: keba_heat_pump_modbus
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `title` | string | `KEBA Heat Pump` | Card title shown in the dashboard. |
+| `entity_prefix` | string | `keba_heat_pump_modbus` | Entity id prefix used to resolve integration entities. |
+
+The card exposes:
+
+- System operating mode
+- Heat pump operating mode and status
+- Hot water tank mode, top/reduced set temperatures, and excess-energy target temperature
+- Heating circuit room/reduced set temperatures and operating modes (for each configured circuit)
+
+> **After updating the integration** (via HACS or manually), **restart Home Assistant** before using new card features. The card is served fresh, but the loaded Python code only changes on restart.
+
+## Development
+
+### Build the bundled card
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+The build writes `custom_components/keba_heat_pump_modbus/static/keba-heat-pump-modbus-card.js`.
+
+For iterative development with rebuild-on-save:
+
+```bash
+npm run watch
+```
+
+### Local Home Assistant
+
+A Docker Compose stack is provided for testing the integration together with the bundled card against a simulated Modbus TCP server.
+
+```bash
+cd frontend && npm install && npm run build && cd ..
+docker compose up -d
+```
+
+Then open [http://localhost:8123](http://localhost:8123). Add the KEBA integration using the simulator host `modbus-simulator` and port `502` (the simulator is reachable at `localhost:5020` from the Docker host for debugging).
+
+The simulator serves plausible default values for all registers so the integration and card can be exercised without real hardware.
+
 ## Troubleshooting
 
 - Ensure the KEBA controller allows Modbus TCP connections from your Home Assistant host.

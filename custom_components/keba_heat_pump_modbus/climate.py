@@ -109,6 +109,7 @@ class KebaHeatingCircuitClimate(CoordinatorEntity[KebaCoordinator], ClimateEntit
 
         self._attr_unique_id = f"{entry.entry_id}_{device_key}_climate"
         self._attr_name = "Thermostat"
+        self._attr_extra_state_attributes = {"keba_key": f"{mode_reg.unique_id}_climate"}
 
         self._attr_min_temp = (
             target_temp_reg.native_min_value

@@ -138,8 +138,12 @@ def test_async_setup_entry_populates_data_and_schedules_warning(monkeypatch):
             }
         )
 
+    def fake_add_extra_js_url(_hass, _url):  # noqa: ANN001
+        pass
+
     monkeypatch.setattr(integration.persistent_notification,
                         "async_create", fake_async_create)
+    monkeypatch.setattr(integration, "add_extra_js_url", fake_add_extra_js_url)
 
     class DummyLoop:
         def call_soon_threadsafe(self, func, *args, **kwargs):
@@ -152,11 +156,16 @@ def test_async_setup_entry_populates_data_and_schedules_warning(monkeypatch):
         async def async_forward_entry_setups(self, entry, platforms):
             self.forwarded.append((entry, platforms))
 
+    class DummyHttp:
+        async def async_register_static_paths(self, *_args, **_kwargs):
+            pass
+
     class DummyHass:
         def __init__(self):
             self.data = {}
             self.loop = DummyLoop()
             self.config_entries = DummyConfigEntries()
+            self.http = DummyHttp()
 
         async def async_add_executor_job(self, func, *args, **kwargs):
             return func(*args, **kwargs)
@@ -207,6 +216,48 @@ def test_async_setup_entry_populates_data_and_schedules_warning(monkeypatch):
     stored[DATA_CLIENT].warning_callback(42)
     assert notifications
     assert notifications[0]["notification_id"] == f"{DOMAIN}_{entry.entry_id}_write_warning"
+
+
+def test_async_setup_registers_card_once(monkeypatch):
+    import asyncio
+    from pathlib import Path
+
+    from custom_components.keba_heat_pump_modbus import __init__ as integration
+    from custom_components.keba_heat_pump_modbus.const import (
+        CARD_REGISTERED_KEY,
+        DOMAIN,
+    )
+
+    registered_urls = []
+    static_paths = []
+
+    class DummyHttp:
+        async def async_register_static_paths(self, configs):
+            static_paths.extend(configs)
+
+    def fake_add_extra_js_url(_hass, url):
+        registered_urls.append(url)
+
+    monkeypatch.setattr(integration, "add_extra_js_url", fake_add_extra_js_url)
+    monkeypatch.setattr(Path, "is_file", lambda _self: True)
+    monkeypatch.setattr(Path, "read_bytes", lambda _self: b"console.log('card');")
+
+    class DummyHass:
+        def __init__(self):
+            self.data = {DOMAIN: {}}
+            self.http = DummyHttp()
+
+    hass = DummyHass()
+
+    # First registration should register the card.
+    asyncio.run(integration._async_register_card(hass))
+    assert hass.data[DOMAIN][CARD_REGISTERED_KEY] is True
+    assert len(registered_urls) == 1
+    assert static_paths
+
+    # Second registration should be a no-op.
+    asyncio.run(integration._async_register_card(hass))
+    assert len(registered_urls) == 1
 
 
 def test_async_unload_entry_handles_missing_data():

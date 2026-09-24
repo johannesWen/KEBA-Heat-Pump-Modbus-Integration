@@ -1,6 +1,7 @@
 {
   "domain": "keba_heat_pump_modbus",
   "name": "KEBA Heat Pump Modbus",
+  "after_dependencies": ["http", "frontend"],
   "codeowners": [
     "@johannesWen"
   ],
