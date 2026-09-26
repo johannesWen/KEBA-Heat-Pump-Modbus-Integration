@@ -51,10 +51,14 @@ const hass = {
     const plan = plans[data.plan_id];
     if (service === 'add_schedule') {
       const id = [1,2,3,4,5].find(id => !plans[id]);
-      plans[id] = { name: '', enabled: true, off_mode: 'Hot Water', on_mode: 'Auto Heat', on_hours: [] };
+      plans[id] = { name: '', enabled: true, off_mode: 'Hot Water', on_mode: 'Auto Heat', on_hours: [], weekdays: [] };
     } else if (service === 'remove_schedule') { delete plans[data.plan_id]; }
     else if (service === 'set_schedule_hour') {
       plan.on_hours = data.on ? [...plan.on_hours, data.hour] : plan.on_hours.filter(h => h !== data.hour);
+    } else if (service === 'set_schedule_weekday') {
+      plan.weekdays = data.selected
+        ? [...new Set([...plan.weekdays, data.weekday])].sort((a, b) => a - b)
+        : plan.weekdays.filter(day => day !== data.weekday);
     } else {
       const field = service.replace('set_schedule_', '');
       plan[field] = data[field];
@@ -122,6 +126,57 @@ class CardTests(unittest.TestCase):
         expect(self.page.get_by_role("alert")).to_have_count(0)
         expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
 
+    def test_weekday_selection_and_daily_default(self):
+        self.add.click()
+        days = self.page.get_by_role("group", name="Active weekdays")
+        expect(days.get_by_role("button")).to_have_count(7)
+        expect(self.page.get_by_text("No days selected means every day.")).to_be_visible()
+        expect(days.get_by_role("button", name="Monday")).to_have_attribute("aria-pressed", "false")
+
+        days.get_by_role("button", name="Monday").click()
+        expect(days.get_by_role("button", name="Monday")).to_have_attribute("aria-pressed", "true")
+        expect(self.page.get_by_text("Only selected days run this plan.")).to_be_visible()
+        days.get_by_role("button", name="Wednesday").click()
+        expect(days.get_by_role("button", name="Wednesday")).to_have_attribute("aria-pressed", "true")
+        self.assertEqual(self.page.evaluate("window.calls.filter(call => call.service === 'set_schedule_weekday')"), [
+            {"domain": "keba_heat_pump_modbus", "service": "set_schedule_weekday",
+             "data": {"entity_id": "sensor.renamed_schedules", "plan_id": 1, "weekday": 0, "selected": True}},
+            {"domain": "keba_heat_pump_modbus", "service": "set_schedule_weekday",
+             "data": {"entity_id": "sensor.renamed_schedules", "plan_id": 1, "weekday": 2, "selected": True}},
+        ])
+        self.page.evaluate("window.publish()")
+        expect(days.get_by_role("button", name="Wednesday")).to_have_attribute("aria-pressed", "true")
+        days.get_by_role("button", name="Monday").click()
+        days.get_by_role("button", name="Wednesday").click()
+        expect(self.page.get_by_text("No days selected means every day.")).to_be_visible()
+        expect(self.page.locator(".weekday-section .muted")).to_have_text("Every day")
+
+        self.add.click()
+        expect(self.page.get_by_role("tabpanel").get_by_role("button", name="Monday")).to_have_attribute("aria-pressed", "false")
+        self.page.get_by_role("tab", name="Plan 1: Plan 1").click()
+        expect(self.page.locator(".weekday-section .muted")).to_have_text("Every day")
+
+    def test_rename_survives_state_refresh_before_save(self):
+        self.add.click()
+        name = self.page.get_by_role("textbox", name="Name for plan 1")
+        name.fill("Evening comfort")
+        # Home Assistant refreshes the card while the user is still typing.
+        self.page.evaluate("window.publish()")
+        expect(name).to_have_value("Evening comfort")
+        name.press("Tab")
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_have_value("Evening comfort")
+        name_calls = self.page.evaluate("window.calls.filter(call => call.service === 'set_schedule_name')")
+        self.assertEqual(name_calls, [{
+            "domain": "keba_heat_pump_modbus", "service": "set_schedule_name",
+            "data": {
+                "entity_id": "sensor.renamed_schedules",
+                "plan_id": 1,
+                "name": "Evening comfort",
+            },
+        }])
+        self.page.evaluate("window.publish()")
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_have_value("Evening comfort")
+
     def test_plan_edits_hours_and_failed_toggle(self):
         self.add.click()
         name = self.page.get_by_role("textbox", name="Name for plan 1")
@@ -147,10 +202,39 @@ class CardTests(unittest.TestCase):
         for _ in range(5):
             self.add.click()
         expect(self.add).to_be_disabled()
+        self.page.get_by_role("tab", name="Plan 1: Plan 1").click()
         self.page.get_by_role("button", name="Remove Plan 1", exact=True).click()
         expect(self.add).to_be_enabled()
+        expect(self.page.get_by_role("tab", name="Plan 1: Plan 1")).to_have_count(0)
         expect(self.page.get_by_role("textbox", name="Name for plan 2")).to_have_value("Plan 2")
         self.add.click()
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
+
+    def test_plan_tabs_switch_and_preserve_selection(self):
+        self.add.click()
+        self.add.click()
+        expect(self.page.get_by_role("tab")).to_have_count(2)
+        expect(self.page.get_by_role("tab", name="Plan 2: Plan 2")).to_have_attribute("aria-selected", "true")
+        expect(self.page.get_by_role("tabpanel")).to_have_count(1)
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_have_count(0)
+
+        second_name = self.page.get_by_role("textbox", name="Name for plan 2")
+        second_name.fill("Night")
+        second_name.press("Tab")
+        expect(self.page.get_by_role("tab", name="Plan 2: Night")).to_be_visible()
+        self.page.get_by_role("tab", name="Plan 1: Plan 1").click()
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
+        self.page.evaluate("window.publish()")
+        expect(self.page.get_by_role("tab", name="Plan 1: Plan 1")).to_have_attribute("aria-selected", "true")
+        expect(self.page.get_by_role("textbox", name="Name for plan 2")).to_have_count(0)
+
+        first_tab = self.page.get_by_role("tab", name="Plan 1: Plan 1")
+        first_tab.focus()
+        first_tab.press("ArrowRight")
+        expect(self.page.get_by_role("tab", name="Plan 2: Night")).to_have_attribute("aria-selected", "true")
+        expect(self.page.get_by_role("textbox", name="Name for plan 2")).to_have_value("Night")
+        self.page.get_by_role("button", name="Remove Night").click()
+        expect(self.page.get_by_role("tab")).to_have_count(1)
         expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
 
     def test_narrow_card_on_desktop_and_dark_theme(self):
@@ -158,11 +242,15 @@ class CardTests(unittest.TestCase):
         for width in [280, 320, 420, 700]:
             self.page.locator("keba-heat-pump-modbus-card").evaluate("(card, width) => card.style.width = `${width}px`", width)
             overflow = self.page.locator("keba-heat-pump-modbus-card").evaluate("""card => {
-              const nodes = [...card.shadowRoot.querySelectorAll('.plan-card, .plan-modes, .hour-grid')];
+              const nodes = [...card.shadowRoot.querySelectorAll('.plan-card, .plan-modes, .hour-grid, .weekday-grid')];
               return nodes.some(node => node.scrollWidth > node.clientWidth + 1);
             }""")
             self.assertFalse(overflow, f"Overflow at {width}px")
-            self.assertGreaterEqual(self.page.locator(".hour-chip").first.bounding_box()["height"], 40)
+            self.assertGreaterEqual(self.page.locator(".hour-chip").first.bounding_box()["height"], 32)
+            columns = self.page.locator(".hour-grid").evaluate(
+                "node => getComputedStyle(node).gridTemplateColumns.split(' ').length"
+            )
+            self.assertEqual(columns, 6 if width <= 350 else 12 if width >= 520 else 8)
         self.page.evaluate("""() => {
           card.style.width = '320px';
           document.body.style.setProperty('--card-background-color', '#18242b');

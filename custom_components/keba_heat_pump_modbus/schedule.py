@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
@@ -28,6 +29,7 @@ from .const import (
     SERVICE_REMOVE_SCHEDULE,
     SERVICE_SET_SCHEDULE_ENABLED,
     SERVICE_SET_SCHEDULE_HOUR,
+    SERVICE_SET_SCHEDULE_WEEKDAY,
     SERVICE_SET_SCHEDULE_NAME,
     SERVICE_SET_SCHEDULE_OFF_MODE,
     SERVICE_SET_SCHEDULE_ON_MODE,
@@ -43,6 +45,8 @@ ATTR_ENABLED = "enabled"
 ATTR_OFF_MODE = "off_mode"
 ATTR_ON_MODE = "on_mode"
 ATTR_HOUR = "hour"
+ATTR_WEEKDAY = "weekday"
+ATTR_SELECTED = "selected"
 ATTR_ON = "on"
 
 DEFAULT_OFF_MODE = "Hot Water"
@@ -61,6 +65,7 @@ class SchedulePlan:
     off_mode: str = DEFAULT_OFF_MODE
     on_mode: str = DEFAULT_ON_MODE
     on_hours: List[int] = field(default_factory=list)
+    weekdays: List[int] = field(default_factory=list)
 
     def asdict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -104,6 +109,8 @@ class KebaScheduleManager:
         self._unload_callbacks: List[Any] = []
         self._entities: List[Any] = []
         self._scheduled_mode: str | None = None
+        self._last_applied_mode: str | None = None
+        self._evaluation_lock = asyncio.Lock()
 
     @property
     def entity_prefix(self) -> str:
@@ -119,7 +126,8 @@ class KebaScheduleManager:
 
     @property
     def active(self) -> bool:
-        return any(plan.enabled for plan in self._plans.values())
+        """Whether at least one enabled plan applies on the current local day."""
+        return bool(self._eligible_plans(dt_now().weekday()))
 
     @property
     def schedules_sensor_entity_id(self) -> str:
@@ -213,75 +221,85 @@ class KebaScheduleManager:
         return ent_reg.async_get_entity_id("select", DOMAIN, target_unique_id)
 
     async def _async_evaluate(self) -> None:
-        """Compute and apply the scheduled operating mode."""
-        target_mode = self._compute_target_mode()
+        """Apply a mode only when the schedule selects a different mode.
 
-        if target_mode is None:
+        Track successful applications separately from the sensor's target mode.
+        That lets us retry after an unavailable entity or failed service call,
+        without resending a command while the same mode spans several hours.
+        """
+        async with self._evaluation_lock:
+            target_mode = self._compute_target_mode()
             if self._scheduled_mode != target_mode:
                 self._scheduled_mode = target_mode
                 self._async_update_entities()
-            return
 
-        operating_mode_entity = self._resolve_operating_mode_entity_id()
-        if operating_mode_entity is None:
-            # Entity not ready yet; keep the scheduled mode state up to date.
-            if self._scheduled_mode != target_mode:
-                self._scheduled_mode = target_mode
-                self._async_update_entities()
-            return
+            if target_mode is None:
+                self._last_applied_mode = None
+                return
 
-        current_state = self.hass.states.get(operating_mode_entity)
-        current_mode = (
-            None
-            if current_state is None
-            or current_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)
-            else current_state.state
+            if target_mode == self._last_applied_mode:
+                return
+
+            operating_mode_entity = self._resolve_operating_mode_entity_id()
+            if operating_mode_entity is None:
+                return
+
+            current_state = self.hass.states.get(operating_mode_entity)
+            if current_state is None or current_state.state in (
+                STATE_UNAVAILABLE,
+                STATE_UNKNOWN,
+            ):
+                return
+
+            if current_state.state != target_mode:
+                try:
+                    await self.hass.services.async_call(
+                        "select",
+                        "select_option",
+                        {
+                            ATTR_ENTITY_ID: operating_mode_entity,
+                            "option": target_mode,
+                        },
+                        blocking=True,
+                    )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.error(
+                        "Failed to apply scheduled operating mode '%s': %s",
+                        target_mode,
+                        err,
+                    )
+                    return
+
+            self._last_applied_mode = target_mode
+
+    def _eligible_plans(self, weekday: int) -> List[SchedulePlan]:
+        """Return enabled plans for the local weekday, in priority order."""
+        return sorted(
+            (
+                plan
+                for plan in self._plans.values()
+                if plan.enabled and (not plan.weekdays or weekday in plan.weekdays)
+            ),
+            key=lambda plan: plan.plan_id,
         )
-
-        if target_mode != current_mode:
-            try:
-                await self.hass.services.async_call(
-                    "select",
-                    "select_option",
-                    {
-                        ATTR_ENTITY_ID: operating_mode_entity,
-                        "option": target_mode,
-                    },
-                    blocking=False,
-                )
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.error(
-                    "Failed to apply scheduled operating mode '%s': %s",
-                    target_mode,
-                    err,
-                )
-
-        if self._scheduled_mode != target_mode:
-            self._scheduled_mode = target_mode
-            self._async_update_entities()
 
     def _compute_target_mode(self) -> str | None:
-        """Return the operating mode that should currently be active.
+        """Return today's highest-priority On mode, or its fallback Off mode.
 
-        Enabled plans are evaluated by plan_id (1 = highest priority). If any
-        enabled plan has the current hour in on_hours, its on_mode wins.
-        Otherwise the off_mode of the lowest enabled plan_id is used.
-        Returns None when no plan is enabled.
+        A plan with no selected weekdays applies every day. Ineligible plans
+        contribute neither their On nor their Off mode. When none apply, the
+        scheduler leaves the current operating mode untouched.
         """
-        enabled_plans = sorted(
-            (plan for plan in self._plans.values() if plan.enabled),
-            key=lambda p: p.plan_id,
-        )
-        if not enabled_plans:
+        local_now = dt_now()
+        eligible_plans = self._eligible_plans(local_now.weekday())
+        if not eligible_plans:
             return None
 
-        current_hour = dt_now().hour
-
-        for plan in enabled_plans:
-            if current_hour in plan.on_hours:
+        for plan in eligible_plans:
+            if local_now.hour in plan.on_hours:
                 return plan.on_mode
 
-        return enabled_plans[0].off_mode
+        return eligible_plans[0].off_mode
 
     def _get_plan(self, plan_id: int) -> SchedulePlan:
         if plan_id not in self._plans:
@@ -309,6 +327,7 @@ class KebaScheduleManager:
                 "off_mode": plan.off_mode,
                 "on_mode": plan.on_mode,
                 "on_hours": sorted(plan.on_hours),
+                "weekdays": sorted(plan.weekdays),
             }
             for plan in self._plans.values()
         }
@@ -357,6 +376,17 @@ class KebaScheduleManager:
     async def _service_set_schedule_on_mode(self, call: ServiceCall) -> None:
         plan = self._get_plan(call.data[ATTR_PLAN_ID])
         plan.on_mode = call.data[ATTR_ON_MODE]
+        await self._async_update_plan(plan)
+
+    async def _service_set_schedule_weekday(self, call: ServiceCall) -> None:
+        plan = self._get_plan(call.data[ATTR_PLAN_ID])
+        weekday = call.data[ATTR_WEEKDAY]
+        if call.data[ATTR_SELECTED]:
+            if weekday not in plan.weekdays:
+                plan.weekdays.append(weekday)
+                plan.weekdays.sort()
+        else:
+            plan.weekdays = [day for day in plan.weekdays if day != weekday]
         await self._async_update_plan(plan)
 
     async def _service_set_schedule_hour(self, call: ServiceCall) -> None:
@@ -418,6 +448,18 @@ SERVICE_SCHEMAS = {
                 vol.Coerce(int), vol.Range(min=1, max=SCHEDULE_MAX_PLANS)
             ),
             vol.Required(ATTR_ON_MODE): cv.string,
+        }
+    ),
+    SERVICE_SET_SCHEDULE_WEEKDAY: vol.Schema(
+        {
+            vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+            vol.Required(ATTR_PLAN_ID): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=SCHEDULE_MAX_PLANS)
+            ),
+            vol.Required(ATTR_WEEKDAY): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=6)
+            ),
+            vol.Required(ATTR_SELECTED): cv.boolean,
         }
     ),
     SERVICE_SET_SCHEDULE_HOUR: vol.Schema(
