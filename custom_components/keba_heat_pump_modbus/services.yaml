@@ -175,8 +175,8 @@ set_schedule_hour:
           min: 0
           max: 23
           mode: box
-    on:
-      name: On
+    "on":
+      name: "On"
       description: True to add the hour, false to remove it.
       required: true
       selector:
