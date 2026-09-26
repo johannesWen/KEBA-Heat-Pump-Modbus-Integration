@@ -635,7 +635,7 @@ class KebaHeatPumpModbusCard extends LitElement {
               class="plan-name-input"
               type="text"
               aria-label="Name for plan ${plan.planId}"
-              .value=${live(displayName)}
+              .value=${displayName}
               placeholder="Plan name"
               maxlength="32"
               @change=${(e) => this._setPlanName(plan.planId, e.target.value)}

@@ -122,6 +122,27 @@ class CardTests(unittest.TestCase):
         expect(self.page.get_by_role("alert")).to_have_count(0)
         expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
 
+    def test_rename_survives_state_refresh_before_save(self):
+        self.add.click()
+        name = self.page.get_by_role("textbox", name="Name for plan 1")
+        name.fill("Evening comfort")
+        # Home Assistant refreshes the card while the user is still typing.
+        self.page.evaluate("window.publish()")
+        expect(name).to_have_value("Evening comfort")
+        name.press("Tab")
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_have_value("Evening comfort")
+        name_calls = self.page.evaluate("window.calls.filter(call => call.service === 'set_schedule_name')")
+        self.assertEqual(name_calls, [{
+            "domain": "keba_heat_pump_modbus", "service": "set_schedule_name",
+            "data": {
+                "entity_id": "sensor.renamed_schedules",
+                "plan_id": 1,
+                "name": "Evening comfort",
+            },
+        }])
+        self.page.evaluate("window.publish()")
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_have_value("Evening comfort")
+
     def test_plan_edits_hours_and_failed_toggle(self):
         self.add.click()
         name = self.page.get_by_role("textbox", name="Name for plan 1")
