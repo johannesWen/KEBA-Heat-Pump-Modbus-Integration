@@ -19,6 +19,15 @@ const SECTIONS = [
 ];
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const WEEKDAYS = [
+  { index: 0, label: 'Mon', full: 'Monday' },
+  { index: 1, label: 'Tue', full: 'Tuesday' },
+  { index: 2, label: 'Wed', full: 'Wednesday' },
+  { index: 3, label: 'Thu', full: 'Thursday' },
+  { index: 4, label: 'Fri', full: 'Friday' },
+  { index: 5, label: 'Sat', full: 'Saturday' },
+  { index: 6, label: 'Sun', full: 'Sunday' },
+];
 
 class KebaHeatPumpModbusCard extends LitElement {
   static get properties() {
@@ -555,6 +564,10 @@ class KebaHeatPumpModbusCard extends LitElement {
     this._callScheduleService('set_schedule_hour', { plan_id: planId, hour, on });
   }
 
+  _setPlanWeekday(planId, weekday, selected) {
+    this._callScheduleService('set_schedule_weekday', { plan_id: planId, weekday, selected });
+  }
+
   _renderScheduleStatus() {
     const active = this._val('binary_sensor', 'schedule_active');
     const scheduledMode = this._val('sensor', 'scheduled_mode');
@@ -581,6 +594,35 @@ class KebaHeatPumpModbusCard extends LitElement {
               </div>
             `
           : nothing}
+      </div>
+    `;
+  }
+
+  _renderWeekdayGrid(plan) {
+    const selectedDays = new Set(plan.weekdays || []);
+    const summary = selectedDays.size
+      ? WEEKDAYS.filter((day) => selectedDays.has(day.index)).map((day) => day.label).join(', ')
+      : 'Every day';
+    return html`
+      <div class="weekday-section">
+        <div class="hours-heading">
+          <span>Active days</span>
+          <span class="muted">${summary}</span>
+        </div>
+        <div class="weekday-grid" role="group" aria-label="Active weekdays">
+          ${WEEKDAYS.map((day) => html`
+            <button
+              type="button"
+              class="day-chip ${selectedDays.has(day.index) ? 'on' : ''}"
+              aria-label=${day.full}
+              aria-pressed=${selectedDays.has(day.index)}
+              @click=${() => this._setPlanWeekday(plan.planId, day.index, !selectedDays.has(day.index))}
+            >${day.label}</button>
+          `)}
+        </div>
+        <p class="weekday-hint">${selectedDays.size
+          ? 'Only selected days run this plan.'
+          : 'No days selected means every day.'}</p>
       </div>
     `;
   }
@@ -724,6 +766,7 @@ class KebaHeatPumpModbusCard extends LitElement {
             </button>
           </div>
         </div>
+        ${this._renderWeekdayGrid(plan)}
         <div class="plan-modes">
           <label class="mode-field">
             <span class="control-label">Off mode <small>Outside selected hours</small></span>
@@ -804,7 +847,7 @@ class KebaHeatPumpModbusCard extends LitElement {
         </button>
       </div>
       <p class="schedule-hint">
-        Tap an hour to switch between On and Off mode. Repeats every day${this.hass.config?.time_zone ? ` · ${this.hass.config.time_zone}` : ''}.
+        Select weekdays and hours for each plan${this.hass.config?.time_zone ? ` · ${this.hass.config.time_zone}` : ''}.
       </p>
       <div class="save-status muted" role="status" aria-live="polite">
         ${this._pending ? 'Saving…' : !canAdd ? 'Plan limit reached. Remove a plan to add another.' : 'Changes apply immediately.'}
@@ -1170,13 +1213,16 @@ class KebaHeatPumpModbusCard extends LitElement {
         cursor: pointer;
       }
       .icon-btn.danger:hover { color: var(--error-color, #db4437); background: var(--secondary-background-color); }
+      .weekday-section { margin-bottom: 18px; }
+      .weekday-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+      .weekday-hint { margin: 7px 0 0; color: var(--secondary-text-color); font-size: 11px; }
       .plan-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
       .mode-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; }
       .mode-field small { display: block; color: var(--secondary-text-color); font-size: 11px; margin-top: 2px; }
       .mode-field select { width: 100%; min-width: 0; min-height: 44px; border-radius: 6px; }
       .hours-heading { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; margin-bottom: 10px; }
       .hour-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
-      .hour-chip {
+      .hour-chip, .day-chip {
         min-width: 0;
         min-height: 32px;
         padding: 0;
@@ -1188,8 +1234,8 @@ class KebaHeatPumpModbusCard extends LitElement {
         font-variant-numeric: tabular-nums;
         cursor: pointer;
       }
-      .hour-chip:hover:not(:disabled) { border-color: var(--primary-color); }
-      .hour-chip.on {
+      .hour-chip:hover:not(:disabled), .day-chip:hover:not(:disabled) { border-color: var(--primary-color); }
+      .hour-chip.on, .day-chip.on {
         background: var(--primary-color);
         color: var(--text-primary-color, #fff);
         border-color: var(--primary-color);

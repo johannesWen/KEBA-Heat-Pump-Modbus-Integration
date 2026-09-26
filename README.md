@@ -81,12 +81,13 @@ Use the Schedule view to create plans that change the heat pump's system operati
 
 Each plan has:
 
+- **Active days** — select Mon–Sun; an empty selection runs every day. A plan is ignored on other days, including its Off mode.
 - **Off mode** — operating mode used outside the selected hours (e.g. `Hot Water`).
 - **On mode** — operating mode used during the selected hours (e.g. `Auto Heat`).
-- **On hours** — 24 toggle buttons, one per hour.
+- **On hours** — 24 toggle buttons, one per hour on active days. A Monday-only plan does not carry past midnight into Tuesday.
 - **Enabled** — activate or deactivate the plan.
 
-Up to 5 plans can be defined. Multiple plans can be enabled at the same time; plans are evaluated by plan number, with plan 1 having the highest priority. If any enabled plan has the current hour selected, its On mode wins. Otherwise the Off mode of the lowest-numbered enabled plan is used. Changes apply immediately. The scheduler sends a mode command only when the selected mode changes, including changes between Off and On hours. It retries a failed change, but does not resend the same mode for every selected hour. A manual operating-mode change during a scheduled period remains until the next scheduled mode transition. Plans repeat daily using Home Assistant’s configured time zone. The card shows the selected time ranges, saving status, and any service errors.
+Up to 5 plans can be defined. Multiple plans can be enabled at the same time; plans are evaluated by plan number, with plan 1 having the highest priority. If any enabled plan eligible today has the current hour selected, its On mode wins. Otherwise the Off mode of the lowest-numbered enabled plan eligible today is used. If none applies today, the current operating mode is left unchanged. Changes apply immediately. The scheduler sends a mode command only when the selected mode changes, including changes between Off and On hours. It retries a failed change, but does not resend the same mode for every selected hour. A manual operating-mode change during a scheduled period remains until the next scheduled mode transition. Plans repeat daily using Home Assistant’s configured time zone. The card shows the selected time ranges, saving status, and any service errors.
 
 ```yaml
 type: custom:keba-heat-pump-modbus-card

@@ -47,6 +47,7 @@ SERVICE_SET_SCHEDULE_NAME = "set_schedule_name"
 SERVICE_SET_SCHEDULE_OFF_MODE = "set_schedule_off_mode"
 SERVICE_SET_SCHEDULE_ON_MODE = "set_schedule_on_mode"
 SERVICE_SET_SCHEDULE_HOUR = "set_schedule_hour"
+SERVICE_SET_SCHEDULE_WEEKDAY = "set_schedule_weekday"
 SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
 
 PLATFORMS = [
