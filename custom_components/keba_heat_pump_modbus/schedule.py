@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
@@ -104,6 +105,8 @@ class KebaScheduleManager:
         self._unload_callbacks: List[Any] = []
         self._entities: List[Any] = []
         self._scheduled_mode: str | None = None
+        self._last_applied_mode: str | None = None
+        self._evaluation_lock = asyncio.Lock()
 
     @property
     def entity_prefix(self) -> str:
@@ -213,52 +216,56 @@ class KebaScheduleManager:
         return ent_reg.async_get_entity_id("select", DOMAIN, target_unique_id)
 
     async def _async_evaluate(self) -> None:
-        """Compute and apply the scheduled operating mode."""
-        target_mode = self._compute_target_mode()
+        """Apply a mode only when the schedule selects a different mode.
 
-        if target_mode is None:
+        Track successful applications separately from the sensor's target mode.
+        That lets us retry after an unavailable entity or failed service call,
+        without resending a command while the same mode spans several hours.
+        """
+        async with self._evaluation_lock:
+            target_mode = self._compute_target_mode()
             if self._scheduled_mode != target_mode:
                 self._scheduled_mode = target_mode
                 self._async_update_entities()
-            return
 
-        operating_mode_entity = self._resolve_operating_mode_entity_id()
-        if operating_mode_entity is None:
-            # Entity not ready yet; keep the scheduled mode state up to date.
-            if self._scheduled_mode != target_mode:
-                self._scheduled_mode = target_mode
-                self._async_update_entities()
-            return
+            if target_mode is None:
+                self._last_applied_mode = None
+                return
 
-        current_state = self.hass.states.get(operating_mode_entity)
-        current_mode = (
-            None
-            if current_state is None
-            or current_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)
-            else current_state.state
-        )
+            if target_mode == self._last_applied_mode:
+                return
 
-        if target_mode != current_mode:
-            try:
-                await self.hass.services.async_call(
-                    "select",
-                    "select_option",
-                    {
-                        ATTR_ENTITY_ID: operating_mode_entity,
-                        "option": target_mode,
-                    },
-                    blocking=False,
-                )
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.error(
-                    "Failed to apply scheduled operating mode '%s': %s",
-                    target_mode,
-                    err,
-                )
+            operating_mode_entity = self._resolve_operating_mode_entity_id()
+            if operating_mode_entity is None:
+                return
 
-        if self._scheduled_mode != target_mode:
-            self._scheduled_mode = target_mode
-            self._async_update_entities()
+            current_state = self.hass.states.get(operating_mode_entity)
+            if current_state is None or current_state.state in (
+                STATE_UNAVAILABLE,
+                STATE_UNKNOWN,
+            ):
+                return
+
+            if current_state.state != target_mode:
+                try:
+                    await self.hass.services.async_call(
+                        "select",
+                        "select_option",
+                        {
+                            ATTR_ENTITY_ID: operating_mode_entity,
+                            "option": target_mode,
+                        },
+                        blocking=True,
+                    )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.error(
+                        "Failed to apply scheduled operating mode '%s': %s",
+                        target_mode,
+                        err,
+                    )
+                    return
+
+            self._last_applied_mode = target_mode
 
     def _compute_target_mode(self) -> str | None:
         """Return the operating mode that should currently be active.

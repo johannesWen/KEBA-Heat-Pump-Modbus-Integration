@@ -168,10 +168,39 @@ class CardTests(unittest.TestCase):
         for _ in range(5):
             self.add.click()
         expect(self.add).to_be_disabled()
+        self.page.get_by_role("tab", name="Plan 1: Plan 1").click()
         self.page.get_by_role("button", name="Remove Plan 1", exact=True).click()
         expect(self.add).to_be_enabled()
+        expect(self.page.get_by_role("tab", name="Plan 1: Plan 1")).to_have_count(0)
         expect(self.page.get_by_role("textbox", name="Name for plan 2")).to_have_value("Plan 2")
         self.add.click()
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
+
+    def test_plan_tabs_switch_and_preserve_selection(self):
+        self.add.click()
+        self.add.click()
+        expect(self.page.get_by_role("tab")).to_have_count(2)
+        expect(self.page.get_by_role("tab", name="Plan 2: Plan 2")).to_have_attribute("aria-selected", "true")
+        expect(self.page.get_by_role("tabpanel")).to_have_count(1)
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_have_count(0)
+
+        second_name = self.page.get_by_role("textbox", name="Name for plan 2")
+        second_name.fill("Night")
+        second_name.press("Tab")
+        expect(self.page.get_by_role("tab", name="Plan 2: Night")).to_be_visible()
+        self.page.get_by_role("tab", name="Plan 1: Plan 1").click()
+        expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
+        self.page.evaluate("window.publish()")
+        expect(self.page.get_by_role("tab", name="Plan 1: Plan 1")).to_have_attribute("aria-selected", "true")
+        expect(self.page.get_by_role("textbox", name="Name for plan 2")).to_have_count(0)
+
+        first_tab = self.page.get_by_role("tab", name="Plan 1: Plan 1")
+        first_tab.focus()
+        first_tab.press("ArrowRight")
+        expect(self.page.get_by_role("tab", name="Plan 2: Night")).to_have_attribute("aria-selected", "true")
+        expect(self.page.get_by_role("textbox", name="Name for plan 2")).to_have_value("Night")
+        self.page.get_by_role("button", name="Remove Night").click()
+        expect(self.page.get_by_role("tab")).to_have_count(1)
         expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
 
     def test_narrow_card_on_desktop_and_dark_theme(self):
@@ -183,7 +212,11 @@ class CardTests(unittest.TestCase):
               return nodes.some(node => node.scrollWidth > node.clientWidth + 1);
             }""")
             self.assertFalse(overflow, f"Overflow at {width}px")
-            self.assertGreaterEqual(self.page.locator(".hour-chip").first.bounding_box()["height"], 40)
+            self.assertGreaterEqual(self.page.locator(".hour-chip").first.bounding_box()["height"], 32)
+            columns = self.page.locator(".hour-grid").evaluate(
+                "node => getComputedStyle(node).gridTemplateColumns.split(' ').length"
+            )
+            self.assertEqual(columns, 6 if width <= 350 else 12 if width >= 520 else 8)
         self.page.evaluate("""() => {
           card.style.width = '320px';
           document.body.style.setProperty('--card-background-color', '#18242b');

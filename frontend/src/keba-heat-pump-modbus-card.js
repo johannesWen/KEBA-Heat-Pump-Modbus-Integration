@@ -1,6 +1,5 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { live } from 'lit/directives/live.js';
-import { repeat } from 'lit/directives/repeat.js';
 import { CARD_VERSION } from 'virtual:integration-version';
 
 const CARD_TAG = 'keba-heat-pump-modbus-card';
@@ -29,6 +28,7 @@ class KebaHeatPumpModbusCard extends LitElement {
       _currentView: { state: true },
       _lastError: { state: true },
       _pending: { state: true },
+      _selectedPlanId: { state: true },
     };
   }
 
@@ -39,6 +39,8 @@ class KebaHeatPumpModbusCard extends LitElement {
     this._currentView = DEFAULT_VIEW;
     this._lastError = null;
     this._pending = false;
+    this._selectedPlanId = null;
+    this._selectAfterAdd = null;
   }
 
   setConfig(config) {
@@ -521,8 +523,12 @@ class KebaHeatPumpModbusCard extends LitElement {
     }
   }
 
-  _addPlan() {
-    return this._callScheduleService('add_schedule', {});
+  async _addPlan() {
+    // Select the newly created plan when its sensor update arrives, even if
+    // the service response arrives before the state change.
+    this._selectAfterAdd = new Set(this._getPlans().map((plan) => plan.planId));
+    await this._callScheduleService('add_schedule', {});
+    if (this._lastError) this._selectAfterAdd = null;
   }
 
   _removePlan(planId) {
@@ -621,6 +627,61 @@ class KebaHeatPumpModbusCard extends LitElement {
     return ranges.join(', ');
   }
 
+  _selectedPlan(plans) {
+    if (this._selectAfterAdd) {
+      const added = plans.find((plan) => !this._selectAfterAdd.has(plan.planId));
+      if (added) {
+        this._selectedPlanId = added.planId;
+        this._selectAfterAdd = null;
+      }
+    }
+    const selected = plans.find((plan) => plan.planId === this._selectedPlanId) || plans[0];
+    if (selected && this._selectedPlanId !== selected.planId) this._selectedPlanId = selected.planId;
+    return selected;
+  }
+
+  _handlePlanTabKeydown(event, plans, index) {
+    const last = plans.length - 1;
+    let next;
+    switch (event.key) {
+      case 'ArrowRight': next = index === last ? 0 : index + 1; break;
+      case 'ArrowLeft': next = index === 0 ? last : index - 1; break;
+      case 'Home': next = 0; break;
+      case 'End': next = last; break;
+      default: return;
+    }
+    event.preventDefault();
+    this._selectedPlanId = plans[next].planId;
+    this.updateComplete.then(() =>
+      this.renderRoot.querySelector(`#plan-tab-${plans[next].planId}`)?.focus(),
+    );
+  }
+
+  _renderPlanTabs(plans, selectedPlan) {
+    return html`
+      <div class="plan-tabs" role="tablist" aria-label="Schedule plans">
+        ${plans.map((plan, index) => html`
+          <button
+            type="button"
+            role="tab"
+            id="plan-tab-${plan.planId}"
+            aria-controls="plan-panel-${plan.planId}"
+            aria-selected=${plan.planId === selectedPlan.planId}
+            aria-label="Plan ${plan.planId}: ${plan.name || `Plan ${plan.planId}`}"
+            title=${plan.name || `Plan ${plan.planId}`}
+            tabindex=${plan.planId === selectedPlan.planId ? 0 : -1}
+            class="plan-tab ${plan.planId === selectedPlan.planId ? 'active' : ''}"
+            @click=${() => { this._selectedPlanId = plan.planId; }}
+            @keydown=${(event) => this._handlePlanTabKeydown(event, plans, index)}
+          >
+            <span class="plan-tab-number">${plan.planId}</span>
+            <span class="plan-tab-name">${plan.name || `Plan ${plan.planId}`}</span>
+          </button>
+        `)}
+      </div>
+    `;
+  }
+
   _renderPlanCard(plan, modeOptions) {
     const displayName = plan.name || `Plan ${plan.planId}`;
     // Keep saved modes visible even while the operating-mode entity is unavailable.
@@ -717,6 +778,7 @@ class KebaHeatPumpModbusCard extends LitElement {
     const modeOptions = this._getOperatingModeOptions();
     const maxPlans = state.attributes?.max_plans || 5;
     const canAdd = plans.length < maxPlans;
+    const selectedPlan = this._selectedPlan(plans);
 
     return html`
       ${this._lastError
@@ -747,9 +809,18 @@ class KebaHeatPumpModbusCard extends LitElement {
       <div class="save-status muted" role="status" aria-live="polite">
         ${this._pending ? 'Saving…' : !canAdd ? 'Plan limit reached. Remove a plan to add another.' : 'Changes apply immediately.'}
       </div>
-      <div aria-busy=${this._pending}>
-        ${repeat(plans, (plan) => plan.planId, (plan) => this._renderPlanCard(plan, modeOptions))}
-      </div>
+      ${selectedPlan ? html`
+        ${this._renderPlanTabs(plans, selectedPlan)}
+        <div
+          id="plan-panel-${selectedPlan.planId}"
+          role="tabpanel"
+          aria-labelledby="plan-tab-${selectedPlan.planId}"
+          tabindex="0"
+          aria-busy=${this._pending}
+        >
+          ${this._renderPlanCard(selectedPlan, modeOptions)}
+        </div>
+      ` : nothing}
       ${plans.length === 0
         ? html`<div class="empty-state">
             <ha-icon icon="mdi:calendar-clock-outline"></ha-icon>
@@ -1003,6 +1074,47 @@ class KebaHeatPumpModbusCard extends LitElement {
         background: var(--primary-color);
         color: var(--text-primary-color, #fff);
       }
+      .plan-tabs {
+        display: flex;
+        gap: 4px;
+        min-width: 0;
+        overflow-x: auto;
+        margin: 0 0 12px;
+        padding: 0 0 3px;
+        border-bottom: 1px solid var(--divider-color, #e0e0e0);
+      }
+      .plan-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 1 auto;
+        min-width: 64px;
+        max-width: 150px;
+        min-height: 40px;
+        padding: 6px 10px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 6px 6px 0 0;
+        background: transparent;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+        text-align: left;
+      }
+      .plan-tab:hover { background: var(--secondary-background-color, #f5f5f5); }
+      .plan-tab.active { border-bottom-color: var(--primary-color); color: var(--primary-text-color); font-weight: 600; }
+      .plan-tab-number {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        background: var(--secondary-background-color, #f5f5f5);
+        color: var(--secondary-text-color);
+        font-size: 11px;
+      }
+      .plan-tab.active .plan-tab-number { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+      .plan-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .plan-card {
         min-inline-size: 0;
         margin: 0 0 16px;
@@ -1063,16 +1175,16 @@ class KebaHeatPumpModbusCard extends LitElement {
       .mode-field small { display: block; color: var(--secondary-text-color); font-size: 11px; margin-top: 2px; }
       .mode-field select { width: 100%; min-width: 0; min-height: 44px; border-radius: 6px; }
       .hours-heading { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; margin-bottom: 10px; }
-      .hour-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+      .hour-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
       .hour-chip {
         min-width: 0;
-        min-height: 40px;
+        min-height: 32px;
         padding: 0;
-        border-radius: 6px;
+        border-radius: 5px;
         border: 1px solid var(--divider-color, #e0e0e0);
         background: var(--secondary-background-color, #f5f5f5);
         color: var(--primary-text-color);
-        font-size: 12px;
+        font-size: 11px;
         font-variant-numeric: tabular-nums;
         cursor: pointer;
       }
@@ -1093,10 +1205,11 @@ class KebaHeatPumpModbusCard extends LitElement {
       .empty-state ha-icon { --mdc-icon-size: 32px; color: var(--primary-color); margin-bottom: 12px; }
       .empty-state p { max-width: 36ch; margin: 8px 0 0; color: var(--secondary-text-color); line-height: 1.6; font-size: 13px; }
       .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-      @container (min-width: 600px) {
+      @container (min-width: 520px) {
         .hour-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
       }
       @container (max-width: 350px) {
+        .hour-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
         .plan-card { padding: 12px; }
         .plan-modes { grid-template-columns: 1fr; }
         .plan-actions { justify-content: space-between; width: 100%; }

@@ -441,9 +441,148 @@ def test_shutdown_does_not_remove_platform_entities_twice():
 
 def test_integration_registers_services_without_a_loaded_entry(monkeypatch):
     from unittest.mock import AsyncMock
-    from custom_components.keba_heat_pump_modbus import __init__ as integration
+    from importlib import import_module
 
+    integration = import_module("custom_components.keba_heat_pump_modbus")
     hass = _make_hass()
     monkeypatch.setattr(integration, "_async_register_card", AsyncMock())
     assert asyncio.run(integration.async_setup(hass, {})) is True
     assert hass.services_has(DOMAIN, "add_schedule")
+
+
+def test_schedule_sends_one_command_per_mode_transition(monkeypatch):
+    """Several adjacent on-hours and a stale select state must not resend."""
+    import types
+
+    async def _run():
+        hass = _make_hass()
+        manager = _make_manager(hass)
+        hour = {"value": 5}
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.dt_now",
+            lambda: types.SimpleNamespace(hour=hour["value"]),
+        )
+        entity_id = "select.system_mode"
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
+            lambda _hass: types.SimpleNamespace(
+                async_get_entity_id=lambda *_args: entity_id
+            ),
+        )
+        hass.states[entity_id] = types.SimpleNamespace(state="Hot Water")
+        await manager.async_setup()
+        await manager._service_add_schedule(ServiceCall(data={}))
+        for selected_hour in (6, 7, 8):
+            await manager._service_set_schedule_hour(
+                ServiceCall(data={"plan_id": 1, "hour": selected_hour, "on": True})
+            )
+        assert hass._call_log == []  # The current Off mode is already correct.
+
+        hour["value"] = 6
+        await manager._async_evaluate()
+        assert [call[2]["option"] for call in hass._call_log] == ["Auto Heat"]
+        assert hass._call_log[0][3] is True  # Wait for the service to finish.
+
+        # Keep the reported mode stale across two more hours and a plan edit.
+        for selected_hour in (7, 8):
+            hour["value"] = selected_hour
+            await manager._async_evaluate()
+        await manager._service_set_schedule_name(
+            ServiceCall(data={"plan_id": 1, "name": "Morning"})
+        )
+        assert len(hass._call_log) == 1
+
+        hass.states[entity_id].state = "Auto Heat"
+        hour["value"] = 9
+        await manager._async_evaluate()
+        assert [call[2]["option"] for call in hass._call_log] == [
+            "Auto Heat", "Hot Water"
+        ]
+        hour["value"] = 10
+        await manager._async_evaluate()
+        assert len(hass._call_log) == 2
+        await manager.async_shutdown()
+
+    asyncio.run(_run())
+
+
+def test_schedule_retries_unavailable_or_failed_change(monkeypatch):
+    import types
+
+    async def _run():
+        hass = _make_hass()
+        manager = _make_manager(hass)
+        entity_id = "select.system_mode"
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
+            lambda _hass: types.SimpleNamespace(
+                async_get_entity_id=lambda *_args: entity_id
+            ),
+        )
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.dt_now",
+            lambda: types.SimpleNamespace(hour=6),
+        )
+        manager._plans[1] = SchedulePlan(plan_id=1, on_hours=[6])
+        hass.states[entity_id] = types.SimpleNamespace(state="unavailable")
+        await manager._async_evaluate()
+        assert hass._call_log == []
+        assert manager.scheduled_mode == "Auto Heat"
+
+        attempts = []
+
+        async def flaky_call(domain, service, data, blocking=False):
+            attempts.append((domain, service, data, blocking))
+            if len(attempts) == 1:
+                raise RuntimeError("Modbus write failed")
+
+        hass.services.async_call = flaky_call
+        hass.states[entity_id].state = "Hot Water"
+        await manager._async_evaluate()
+        await manager._async_evaluate()
+        await manager._async_evaluate()
+        assert len(attempts) == 2
+        assert all(call[3] is True for call in attempts)
+        await manager.async_shutdown()
+
+    asyncio.run(_run())
+
+
+def test_overlapping_evaluations_do_not_duplicate_commands(monkeypatch):
+    import types
+
+    async def _run():
+        hass = _make_hass()
+        manager = _make_manager(hass)
+        entity_id = "select.system_mode"
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
+            lambda _hass: types.SimpleNamespace(
+                async_get_entity_id=lambda *_args: entity_id
+            ),
+        )
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.dt_now",
+            lambda: types.SimpleNamespace(hour=6),
+        )
+        manager._plans[1] = SchedulePlan(plan_id=1, on_hours=[6])
+        hass.states[entity_id] = types.SimpleNamespace(state="Hot Water")
+        started = asyncio.Event()
+        release = asyncio.Event()
+        attempts = []
+
+        async def slow_call(domain, service, data, blocking=False):
+            attempts.append(data["option"])
+            started.set()
+            await release.wait()
+
+        hass.services.async_call = slow_call
+        first = asyncio.create_task(manager._async_evaluate())
+        await started.wait()
+        second = asyncio.create_task(manager._async_evaluate())
+        release.set()
+        await asyncio.gather(first, second)
+        assert attempts == ["Auto Heat"]
+        await manager.async_shutdown()
+
+    asyncio.run(_run())
