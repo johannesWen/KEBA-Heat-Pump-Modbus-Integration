@@ -26,6 +26,7 @@ from .const import (
     DATA_CLIENT,
     DATA_COORDINATOR,
     DATA_REGISTERS,
+    DATA_SCHEDULE_MANAGER,
     DEFAULT_CIRCUITS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -34,6 +35,7 @@ from .const import (
 from .coordinator import KebaCoordinator
 from .modbus_client import KebaModbusClient
 from .models import ModbusRegister
+from .schedule import KebaScheduleManager, async_register_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     they have completed the integration's config flow.
     """
     hass.data.setdefault(DOMAIN, {})
+    async_register_services(hass)
     await _async_register_card(hass)
     return True
 
@@ -155,13 +158,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # First refresh to populate data
     await coordinator.async_config_entry_first_refresh()
 
+    schedule_manager = KebaScheduleManager(
+        hass,
+        entry,
+        entity_prefix="keba_heat_pump_modbus",
+    )
+
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_CLIENT: client,
         DATA_COORDINATOR: coordinator,
         DATA_REGISTERS: registers,
+        DATA_SCHEDULE_MANAGER: schedule_manager,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Start the schedule manager after platforms have created its entities.
+    await schedule_manager.async_setup()
 
     # Register the bundled card (idempotent: skips if already registered).
     await _async_register_card(hass)
@@ -172,9 +185,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unload_ok:
+        return False
 
     data = hass.data[DOMAIN].pop(entry.entry_id, None)
     if data is not None:
+        schedule_manager: KebaScheduleManager | None = data.get(DATA_SCHEDULE_MANAGER)
+        if schedule_manager:
+            await schedule_manager.async_shutdown()
         client: KebaModbusClient = data.get(DATA_CLIENT)
         if client:
             await hass.async_add_executor_job(client.close)

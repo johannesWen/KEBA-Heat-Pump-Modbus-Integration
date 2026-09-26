@@ -1,3 +1,5 @@
+import types
+
 import pytest
 
 from custom_components.keba_heat_pump_modbus.__init__ import _filter_circuit_registers
@@ -122,6 +124,7 @@ def test_async_setup_entry_populates_data_and_schedules_warning(monkeypatch):
         DATA_CLIENT,
         DATA_COORDINATOR,
         DATA_REGISTERS,
+        DATA_SCHEDULE_MANAGER,
         DOMAIN,
         PLATFORMS,
     )
@@ -166,9 +169,20 @@ def test_async_setup_entry_populates_data_and_schedules_warning(monkeypatch):
             self.loop = DummyLoop()
             self.config_entries = DummyConfigEntries()
             self.http = DummyHttp()
+            self.services = types.SimpleNamespace(
+                has_service=lambda *args, **kwargs: False,
+                async_register=lambda *args, **kwargs: None,
+            )
+            self.states = types.SimpleNamespace(get=lambda *_a, **_kw: None)
 
         async def async_add_executor_job(self, func, *args, **kwargs):
             return func(*args, **kwargs)
+
+        async def async_call(self, *args, **kwargs):
+            return None
+
+        async def async_create_task(self, coro):
+            await coro
 
     class FakeClient:
         def __init__(self, host, port, unit_id, warning_callback=None):
@@ -207,8 +221,12 @@ def test_async_setup_entry_populates_data_and_schedules_warning(monkeypatch):
     assert ok is True
     assert DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]
     stored = hass.data[DOMAIN][entry.entry_id]
-    assert set(stored.keys()) == {DATA_CLIENT,
-                                  DATA_COORDINATOR, DATA_REGISTERS}
+    assert set(stored.keys()) == {
+        DATA_CLIENT,
+        DATA_COORDINATOR,
+        DATA_REGISTERS,
+        DATA_SCHEDULE_MANAGER,
+    }
     assert stored[DATA_COORDINATOR].first_refresh is True
     assert hass.config_entries.forwarded == [(entry, PLATFORMS)]
 
@@ -283,3 +301,26 @@ def test_async_unload_entry_handles_missing_data():
     entry = ConfigEntry(entry_id="missing")
 
     assert asyncio.run(async_unload_entry(hass, entry)) is True
+
+
+def test_failed_unload_preserves_client_and_scheduler():
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    from custom_components.keba_heat_pump_modbus import async_unload_entry
+    from custom_components.keba_heat_pump_modbus.const import (
+        DATA_CLIENT, DATA_SCHEDULE_MANAGER, DOMAIN,
+    )
+    from homeassistant.config_entries import ConfigEntry
+
+    entry = ConfigEntry(entry_id="still_loaded")
+    client = Mock()
+    manager = types.SimpleNamespace(async_shutdown=AsyncMock())
+    data = {DATA_CLIENT: client, DATA_SCHEDULE_MANAGER: manager}
+    hass = types.SimpleNamespace(
+        data={DOMAIN: {entry.entry_id: data}},
+        config_entries=types.SimpleNamespace(async_unload_platforms=AsyncMock(return_value=False)),
+    )
+    assert asyncio.run(async_unload_entry(hass, entry)) is False
+    assert hass.data[DOMAIN][entry.entry_id] is data
+    manager.async_shutdown.assert_not_awaited()
+    client.close.assert_not_called()

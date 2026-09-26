@@ -68,13 +68,32 @@ entity_prefix: keba_heat_pump_modbus
 | --- | --- | --- | --- |
 | `title` | string | `KEBA Heat Pump` | Card title shown in the dashboard. |
 | `entity_prefix` | string | `keba_heat_pump_modbus` | Entity id prefix used to resolve integration entities. |
+| `view` | string | `settings` | Card view: `settings` or `schedule`. |
 
-The card exposes:
+The card has two views:
 
-- System operating mode
-- Heat pump operating mode and status
-- Hot water tank mode, top/reduced set temperatures, and excess-energy target temperature
-- Heating circuit room/reduced set temperatures and operating modes (for each configured circuit)
+- **Settings** — the default view with system/heat pump/hot water/heating circuit controls.
+- **Schedule** — define up to 5 time-based plans that switch the system operating mode automatically.
+
+### Schedule view
+
+Use the Schedule view to create plans that change the heat pump's system operating mode by hour of day.
+
+Each plan has:
+
+- **Off mode** — operating mode used outside the selected hours (e.g. `Hot Water`).
+- **On mode** — operating mode used during the selected hours (e.g. `Auto Heat`).
+- **On hours** — 24 toggle buttons, one per hour.
+- **Enabled** — activate or deactivate the plan.
+
+Up to 5 plans can be defined. Multiple plans can be enabled at the same time; plans are evaluated by plan number, with plan 1 having the highest priority. If any enabled plan has the current hour selected, its On mode wins. Otherwise the Off mode of the lowest-numbered enabled plan is used. Changes apply immediately. Plans repeat daily using Home Assistant’s configured time zone. The card shows the selected time ranges, saving status, and any service errors.
+
+```yaml
+type: custom:keba-heat-pump-modbus-card
+title: KEBA Heat Pump Schedule
+entity_prefix: keba_heat_pump_modbus
+view: schedule
+```
 
 > **After updating the integration** (via HACS or manually), **restart Home Assistant** before using new card features. The card is served fresh, but the loaded Python code only changes on restart.
 
@@ -95,6 +114,17 @@ For iterative development with rebuild-on-save:
 ```bash
 npm run watch
 ```
+
+### Check the schedule card
+
+After building the card, run the Chromium interaction checks from the repository root:
+
+```bash
+uv run --with playwright==1.58.0 playwright install chromium
+uv run --with playwright==1.58.0 python frontend/tests/check_card.py
+```
+
+These checks simulate Home Assistant states and service responses, without connecting to a heat pump. They cover adding and editing plans, failed saves, the plan limit, unavailable entities, and narrow card layouts.
 
 ### Local Home Assistant
 

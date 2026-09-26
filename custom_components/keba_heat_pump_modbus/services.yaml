@@ -1,0 +1,183 @@
+add_schedule:
+  name: Add schedule plan
+  description: Create a new schedule plan.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+
+remove_schedule:
+  name: Remove schedule plan
+  description: Delete an existing schedule plan.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to remove (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+
+set_schedule_name:
+  name: Set schedule plan name
+  description: Rename a schedule plan.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to rename (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    name:
+      name: Name
+      description: New display name for the plan.
+      required: true
+      selector:
+        text:
+
+set_schedule_enabled:
+  name: Enable or disable schedule plan
+  description: Turn a schedule plan on or off.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to enable or disable (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    enabled:
+      name: Enabled
+      description: Whether the plan should be active.
+      required: true
+      selector:
+        boolean:
+
+set_schedule_off_mode:
+  name: Set schedule off mode
+  description: Set the operating mode used outside the plan's on-hours.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to update (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    off_mode:
+      name: Off mode
+      description: Operating mode to use outside the on-hours.
+      required: true
+      selector:
+        text:
+
+set_schedule_on_mode:
+  name: Set schedule on mode
+  description: Set the operating mode used during the plan's on-hours.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to update (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    on_mode:
+      name: On mode
+      description: Operating mode to use during the on-hours.
+      required: true
+      selector:
+        text:
+
+set_schedule_hour:
+  name: Set schedule hour
+  description: Add or remove an hour from a plan's on-hours.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to update (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    hour:
+      name: Hour
+      description: Hour of the day (0-23).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 23
+          mode: box
+    on:
+      name: On
+      description: True to add the hour, false to remove it.
+      required: true
+      selector:
+        boolean:

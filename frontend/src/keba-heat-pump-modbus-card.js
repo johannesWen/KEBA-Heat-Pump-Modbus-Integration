@@ -1,9 +1,17 @@
 import { LitElement, html, css, nothing } from 'lit';
+import { live } from 'lit/directives/live.js';
+import { repeat } from 'lit/directives/repeat.js';
 import { CARD_VERSION } from 'virtual:integration-version';
 
 const CARD_TAG = 'keba-heat-pump-modbus-card';
 const EDITOR_TAG = 'keba-heat-pump-modbus-card-editor';
 const DEFAULT_PREFIX = 'keba_heat_pump_modbus';
+const DEFAULT_VIEW = 'settings';
+
+const VIEWS = [
+  { key: 'settings', label: 'Settings', icon: 'mdi:cog' },
+  { key: 'schedule', label: 'Schedule', icon: 'mdi:calendar-clock' },
+];
 
 const SECTIONS = [
   { key: 'system', label: 'System', icon: 'mdi:cog' },
@@ -11,11 +19,16 @@ const SECTIONS = [
   { key: 'dhw', label: 'Hot Water', icon: 'mdi:water-boiler' },
 ];
 
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
 class KebaHeatPumpModbusCard extends LitElement {
   static get properties() {
     return {
       hass: { type: Object },
       config: { type: Object },
+      _currentView: { state: true },
+      _lastError: { state: true },
+      _pending: { state: true },
     };
   }
 
@@ -23,14 +36,19 @@ class KebaHeatPumpModbusCard extends LitElement {
     super();
     this.config = {};
     this._entityAliases = {};
+    this._currentView = DEFAULT_VIEW;
+    this._lastError = null;
+    this._pending = false;
   }
 
   setConfig(config) {
     this.config = {
       entity_prefix: DEFAULT_PREFIX,
       title: 'KEBA Heat Pump',
+      view: DEFAULT_VIEW,
       ...config,
     };
+    this._currentView = this.config.view || DEFAULT_VIEW;
   }
 
   getCardSize() {
@@ -42,7 +60,7 @@ class KebaHeatPumpModbusCard extends LitElement {
   }
 
   static getStubConfig() {
-    return { entity_prefix: DEFAULT_PREFIX, title: 'KEBA Heat Pump' };
+    return { entity_prefix: DEFAULT_PREFIX, title: 'KEBA Heat Pump', view: DEFAULT_VIEW };
   }
 
   static _escapeRegExp(text) {
@@ -81,8 +99,8 @@ class KebaHeatPumpModbusCard extends LitElement {
     const wanted = KebaHeatPumpModbusCard._escapeRegExp(
       `${this.config.entity_prefix}_${key}`,
     );
-    const reStrict = new RegExp(`^${domain}\\.${wanted}(?:_\\d+)?$`);
-    const reLoose = new RegExp(`^${domain}\\..*${wanted}(?:_\\d+)?$`);
+    const reStrict = new RegExp(`^${domain}\.${wanted}(?:_\d+)?$`);
+    const reLoose = new RegExp(`^${domain}\..*${wanted}(?:_\d+)?$`);
 
     let best = null;
     for (const entityId of Object.keys(states)) {
@@ -155,7 +173,7 @@ class KebaHeatPumpModbusCard extends LitElement {
     return this._state(domain, key)?.state;
   }
 
-  _callService(domain, service, data) {
+  _callService(domain, service, data, onFail) {
     let result;
     try {
       result = this.hass.callService(domain, service, data);
@@ -167,6 +185,7 @@ class KebaHeatPumpModbusCard extends LitElement {
         `[keba-heat-pump-modbus-card] service ${domain}.${service} failed:`,
         err,
       );
+      if (onFail) onFail(err);
     });
   }
 
@@ -418,10 +437,338 @@ class KebaHeatPumpModbusCard extends LitElement {
     );
   }
 
+  _renderViewTabs() {
+    const current = this._currentView;
+    return html`
+      <div class="view-tabs">
+        ${VIEWS.map(
+          (view) => html`
+            <button
+              type="button"
+              aria-pressed=${current === view.key}
+              class="view-tab ${current === view.key ? 'active' : ''}"
+              @click=${() => this._setView(view.key)}
+            >
+              <ha-icon .icon=${view.icon}></ha-icon>
+              <span>${view.label}</span>
+            </button>
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  _setView(view) {
+    if (this._currentView === view) return;
+    this._currentView = view;
+    this._lastError = null;
+    this.requestUpdate();
+  }
+
+  // ── Settings view ─────────────────────────────────────────
+
+  _renderSettingsView() {
+    return html`
+      ${this._renderSystemSection()}
+      ${this._renderHeatPumpSection()}
+      ${this._renderDhwSection()}
+      ${[1, 2, 3, 4].map((c) => this._renderCircuitSection(c))}
+    `;
+  }
+
+  // ── Schedule view ─────────────────────────────────────────
+
+  _getSchedulesState() {
+    return this._state('sensor', 'schedules');
+  }
+
+  _getOperatingModeOptions() {
+    const state = this._state('select', 'operating_mode');
+    return state?.attributes?.options || [];
+  }
+
+  _getPlans() {
+    const state = this._getSchedulesState();
+    const plansAttr = state?.attributes?.plans || {};
+    return Object.entries(plansAttr)
+      .map(([planId, data]) => ({
+        planId: Number(planId),
+        ...data,
+      }))
+      .sort((a, b) => a.planId - b.planId);
+  }
+
+  _schedulesEntityId() {
+    const state = this._getSchedulesState();
+    return state?.entity_id || this._eid('sensor', 'schedules');
+  }
+
+  async _callScheduleService(service, data) {
+    if (this._pending) return;
+    this._lastError = null;
+    this._pending = true;
+    try {
+      await this._callService(
+        'keba_heat_pump_modbus',
+        service,
+        { entity_id: this._schedulesEntityId(), ...data },
+        (err) => {
+          this._lastError = `Could not save schedule: ${err?.message || err}`;
+        },
+      );
+    } finally {
+      this._pending = false;
+    }
+  }
+
+  _addPlan() {
+    return this._callScheduleService('add_schedule', {});
+  }
+
+  _removePlan(planId) {
+    this._callScheduleService('remove_schedule', { plan_id: planId });
+  }
+
+  _setPlanName(planId, name) {
+    this._callScheduleService('set_schedule_name', { plan_id: planId, name });
+  }
+
+  _setPlanEnabled(planId, enabled) {
+    this._callScheduleService('set_schedule_enabled', { plan_id: planId, enabled });
+  }
+
+  _setPlanOffMode(planId, offMode) {
+    this._callScheduleService('set_schedule_off_mode', { plan_id: planId, off_mode: offMode });
+  }
+
+  _setPlanOnMode(planId, onMode) {
+    this._callScheduleService('set_schedule_on_mode', { plan_id: planId, on_mode: onMode });
+  }
+
+  _setPlanHour(planId, hour, on) {
+    this._callScheduleService('set_schedule_hour', { plan_id: planId, hour, on });
+  }
+
+  _renderScheduleStatus() {
+    const active = this._val('binary_sensor', 'schedule_active');
+    const scheduledMode = this._val('sensor', 'scheduled_mode');
+    const operatingMode = this._val('select', 'operating_mode');
+    return html`
+      <div class="schedule-status">
+        <div class="status-item">
+          <ha-icon icon="mdi:calendar-clock"></ha-icon>
+          <span>Schedule ${active === 'on' ? 'active' : active === 'off' ? 'inactive' : 'unavailable'}</span>
+        </div>
+        ${scheduledMode && scheduledMode !== 'unknown' && scheduledMode !== 'unavailable'
+          ? html`
+              <div class="status-item">
+                <ha-icon icon="mdi:calendar-check"></ha-icon>
+                <span>Scheduled: ${scheduledMode}</span>
+              </div>
+            `
+          : nothing}
+        ${operatingMode && operatingMode !== 'unknown' && operatingMode !== 'unavailable'
+          ? html`
+              <div class="status-item">
+                <ha-icon icon="mdi:cog"></ha-icon>
+                <span>Current: ${operatingMode}</span>
+              </div>
+            `
+          : nothing}
+      </div>
+    `;
+  }
+
+  _renderHourGrid(plan) {
+    const onHours = new Set(plan.on_hours || []);
+    return html`
+      <div class="hour-grid" role="group" aria-label="On hours">
+        ${HOURS.map(
+          (h) => html`
+            <button
+              type="button"
+              aria-pressed=${onHours.has(h)}
+              aria-label="${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00"
+              class="hour-chip ${onHours.has(h) ? 'on' : ''}"
+              @click=${() => this._setPlanHour(plan.planId, h, !onHours.has(h))}
+              title="${String(h).padStart(2, '0')}:00"
+            >
+              ${String(h).padStart(2, '0')}
+            </button>
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  _hourSummary(hours = []) {
+    const selected = HOURS.filter((hour) => hours.includes(hour));
+    if (!selected.length) return 'No on hours selected';
+    if (selected.length === 24) return 'All day';
+    const ranges = [];
+    let start = selected[0];
+    let end = start;
+    const time = (hour) => `${String(hour).padStart(2, '0')}:00`;
+    for (const hour of selected.slice(1)) {
+      if (hour === end + 1) {
+        end = hour;
+      } else {
+        ranges.push(`${time(start)}–${time(end + 1)}`);
+        start = end = hour;
+      }
+    }
+    ranges.push(`${time(start)}–${time(end + 1)}`);
+    return ranges.join(', ');
+  }
+
+  _renderPlanCard(plan, modeOptions) {
+    const displayName = plan.name || `Plan ${plan.planId}`;
+    // Keep saved modes visible even while the operating-mode entity is unavailable.
+    const options = [...new Set([...modeOptions, plan.off_mode, plan.on_mode])].filter(Boolean);
+    return html`
+      <fieldset class="plan-card ${plan.enabled ? 'enabled' : ''}" ?disabled=${this._pending}>
+        <legend class="sr-only">${displayName}</legend>
+        <div class="plan-header">
+          <div class="plan-identity">
+            <span class="plan-number">Plan ${plan.planId}</span>
+            <input
+              class="plan-name-input"
+              type="text"
+              aria-label="Name for plan ${plan.planId}"
+              .value=${live(displayName)}
+              placeholder="Plan name"
+              maxlength="32"
+              @change=${(e) => this._setPlanName(plan.planId, e.target.value)}
+            />
+          </div>
+          <div class="plan-actions">
+            <label class="plan-toggle">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Enable ${displayName}"
+                .checked=${live(Boolean(plan.enabled))}
+                @change=${(e) => this._setPlanEnabled(plan.planId, e.target.checked)}
+              />
+              <span>${plan.enabled ? 'Enabled' : 'Paused'}</span>
+            </label>
+            <button
+              type="button"
+              class="icon-btn danger"
+              title="Remove ${displayName}"
+              aria-label="Remove ${displayName}"
+              @click=${() => this._removePlan(plan.planId)}
+            >
+              <ha-icon icon="mdi:delete-outline"></ha-icon>
+            </button>
+          </div>
+        </div>
+        <div class="plan-modes">
+          <label class="mode-field">
+            <span class="control-label">Off mode <small>Outside selected hours</small></span>
+            <select
+              class="ha-select"
+              .value=${live(plan.off_mode)}
+              @change=${(e) => this._setPlanOffMode(plan.planId, e.target.value)}
+            >
+              ${options.map((opt) => html`<option value=${opt} ?selected=${opt === plan.off_mode}>${opt}</option>`)}
+            </select>
+          </label>
+          <label class="mode-field">
+            <span class="control-label">On mode <small>During selected hours</small></span>
+            <select
+              class="ha-select"
+              .value=${live(plan.on_mode)}
+              @change=${(e) => this._setPlanOnMode(plan.planId, e.target.value)}
+            >
+              ${options.map((opt) => html`<option value=${opt} ?selected=${opt === plan.on_mode}>${opt}</option>`)}
+            </select>
+          </label>
+        </div>
+        <div class="plan-hours">
+          <div class="hours-heading">
+            <span>Daily on hours</span>
+            <span class="muted">${(plan.on_hours || []).length} / 24 h</span>
+          </div>
+          ${this._renderHourGrid(plan)}
+          <p class="hour-summary">${this._hourSummary(plan.on_hours)}</p>
+          <div class="hour-legend">
+            <span><i class="legend-dot selected"></i>On mode</span>
+            <span><i class="legend-dot"></i>Off mode</span>
+          </div>
+        </div>
+      </fieldset>
+    `;
+  }
+
+  _renderScheduleView() {
+    const state = this._getSchedulesState();
+    if (!state || ['unavailable', 'unknown'].includes(state.state)) {
+      return html`
+        <div class="empty-state" role="status">
+          <ha-icon icon="mdi:calendar-alert"></ha-icon>
+          <strong>Schedules unavailable</strong>
+          <p>Check that the KEBA integration is loaded and its Schedules sensor is enabled.</p>
+        </div>
+      `;
+    }
+
+    const plans = this._getPlans();
+    const modeOptions = this._getOperatingModeOptions();
+    const maxPlans = state.attributes?.max_plans || 5;
+    const canAdd = plans.length < maxPlans;
+
+    return html`
+      ${this._lastError
+        ? html`<div class="error-banner" role="alert">
+            <ha-icon icon="mdi:alert-circle"></ha-icon>
+            <span>${this._lastError}</span>
+          </div>`
+        : nothing}
+      ${this._renderScheduleStatus()}
+      <div class="schedule-actions">
+        <div>
+          <h2>Daily plans</h2>
+          <span class="muted">${plans.length} of ${maxPlans} plans</span>
+        </div>
+        <button
+          type="button"
+          class="action-btn primary"
+          ?disabled=${!canAdd || this._pending}
+          @click=${() => this._addPlan()}
+        >
+          <ha-icon icon="mdi:plus"></ha-icon>
+          Add plan
+        </button>
+      </div>
+      <p class="schedule-hint">
+        Tap an hour to switch between On and Off mode. Repeats every day${this.hass.config?.time_zone ? ` · ${this.hass.config.time_zone}` : ''}.
+      </p>
+      <div class="save-status muted" role="status" aria-live="polite">
+        ${this._pending ? 'Saving…' : !canAdd ? 'Plan limit reached. Remove a plan to add another.' : 'Changes apply immediately.'}
+      </div>
+      <div aria-busy=${this._pending}>
+        ${repeat(plans, (plan) => plan.planId, (plan) => this._renderPlanCard(plan, modeOptions))}
+      </div>
+      ${plans.length === 0
+        ? html`<div class="empty-state">
+            <ha-icon icon="mdi:calendar-clock-outline"></ha-icon>
+            <strong>Set your daily rhythm</strong>
+            <p>Add your first plan, choose two operating modes, then select the hours to switch between them.</p>
+          </div>`
+        : html`<p class="schedule-hint priority-note">
+            Lower plan numbers have priority when selected hours overlap. Outside all selected hours,
+            the lowest-numbered enabled plan supplies the Off mode.
+          </p>`}
+    `;
+  }
+
   render() {
     if (!this.hass) {
       return html`<div class="card">Loading...</div>`;
     }
+
+    const view = this._currentView;
 
     return html`
       <ha-card class="card">
@@ -429,11 +776,9 @@ class KebaHeatPumpModbusCard extends LitElement {
           <span class="title">${this.config.title}</span>
           <span class="version">v${CARD_VERSION}</span>
         </div>
+        ${this._renderViewTabs()}
         <div class="card-content">
-          ${this._renderSystemSection()}
-          ${this._renderHeatPumpSection()}
-          ${this._renderDhwSection()}
-          ${[1, 2, 3, 4].map((c) => this._renderCircuitSection(c))}
+          ${view === 'schedule' ? this._renderScheduleView() : this._renderSettingsView()}
         </div>
       </ha-card>
     `;
@@ -459,6 +804,30 @@ class KebaHeatPumpModbusCard extends LitElement {
         font-size: 12px;
         color: var(--secondary-text-color);
         font-weight: 400;
+      }
+      .view-tabs {
+        display: flex;
+        gap: 8px;
+        padding: 0 0 12px 0;
+        border-bottom: 1px solid var(--divider-color, #e0e0e0);
+        margin-bottom: 12px;
+      }
+      .view-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 16px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .view-tab.active {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        border-color: var(--primary-color);
       }
       .section {
         margin-bottom: 16px;
@@ -551,6 +920,187 @@ class KebaHeatPumpModbusCard extends LitElement {
         color: var(--secondary-text-color);
         font-size: 12px;
       }
+
+      /* Schedule controls follow the dashboard theme and the card's own width. */
+      :host {
+        container-type: inline-size;
+      }
+      button, input, select {
+        font: inherit;
+        box-sizing: border-box;
+      }
+      button:focus-visible, input:focus-visible, select:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 3px;
+      }
+      button:disabled, fieldset:disabled input, fieldset:disabled select {
+        cursor: wait;
+        opacity: 0.6;
+      }
+      .view-tab {
+        flex: 1;
+        justify-content: center;
+        min-height: 44px;
+        border-radius: 8px;
+      }
+      .muted, .schedule-hint, .hour-summary {
+        color: var(--secondary-text-color);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .error-banner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid var(--error-color, #db4437);
+        color: var(--error-color, #db4437);
+        margin-bottom: 16px;
+        overflow-wrap: anywhere;
+      }
+      .error-banner ha-icon { flex-shrink: 0; }
+      .schedule-status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 20px;
+      }
+      .status-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: var(--secondary-background-color, #f5f5f5);
+        color: var(--secondary-text-color);
+        font-size: 12px;
+      }
+      .status-item ha-icon { --mdc-icon-size: 18px; }
+      .schedule-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      h2 { margin: 0; font-size: 18px; font-weight: 600; }
+      .schedule-hint { margin: 12px 0 4px; }
+      .save-status { min-height: 18px; margin-bottom: 16px; }
+      .action-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 44px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--primary-color);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .action-btn.primary {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+      }
+      .plan-card {
+        min-inline-size: 0;
+        margin: 0 0 16px;
+        padding: 16px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-inline-start: 3px solid var(--divider-color, #e0e0e0);
+        border-radius: 10px;
+      }
+      .plan-card.enabled { border-inline-start-color: var(--primary-color); }
+      .plan-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .plan-identity { flex: 1 1 140px; min-width: 0; }
+      .plan-number {
+        display: block;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .plan-name-input {
+        width: 100%;
+        min-width: 0;
+        padding: 6px 0;
+        border: 0;
+        border-bottom: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 0;
+        background: transparent;
+        color: var(--primary-text-color);
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .plan-actions, .plan-toggle { display: flex; align-items: center; gap: 10px; }
+      .plan-toggle { font-size: 12px; cursor: pointer; }
+      .plan-toggle input { width: 20px; height: 20px; accent-color: var(--primary-color); }
+      .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+      }
+      .icon-btn.danger:hover { color: var(--error-color, #db4437); background: var(--secondary-background-color); }
+      .plan-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+      .mode-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; }
+      .mode-field small { display: block; color: var(--secondary-text-color); font-size: 11px; margin-top: 2px; }
+      .mode-field select { width: 100%; min-width: 0; min-height: 44px; border-radius: 6px; }
+      .hours-heading { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; margin-bottom: 10px; }
+      .hour-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+      .hour-chip {
+        min-width: 0;
+        min-height: 40px;
+        padding: 0;
+        border-radius: 6px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        background: var(--secondary-background-color, #f5f5f5);
+        color: var(--primary-text-color);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+      }
+      .hour-chip:hover:not(:disabled) { border-color: var(--primary-color); }
+      .hour-chip.on {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        border-color: var(--primary-color);
+        font-weight: 700;
+      }
+      .hour-summary { margin: 10px 0 6px; font-variant-numeric: tabular-nums; }
+      .hour-legend, .hour-legend span { display: flex; align-items: center; gap: 6px; }
+      .hour-legend { gap: 16px; font-size: 11px; color: var(--secondary-text-color); }
+      .legend-dot { width: 8px; height: 8px; border-radius: 2px; background: var(--secondary-background-color, #f5f5f5); border: 1px solid var(--divider-color, #e0e0e0); }
+      .legend-dot.selected { background: var(--primary-color); border-color: var(--primary-color); }
+      .priority-note { padding: 0 2px; }
+      .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 28px 16px; border: 1px dashed var(--divider-color, #e0e0e0); border-radius: 10px; }
+      .empty-state ha-icon { --mdc-icon-size: 32px; color: var(--primary-color); margin-bottom: 12px; }
+      .empty-state p { max-width: 36ch; margin: 8px 0 0; color: var(--secondary-text-color); line-height: 1.6; font-size: 13px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      @container (min-width: 600px) {
+        .hour-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+      }
+      @container (max-width: 350px) {
+        .plan-card { padding: 12px; }
+        .plan-modes { grid-template-columns: 1fr; }
+        .plan-actions { justify-content: space-between; width: 100%; }
+      }
     `;
   }
 }
@@ -582,10 +1132,22 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
     this.dispatchEvent(event);
   }
 
+  _toggleView(view) {
+    if (!this.config) return;
+    const event = new CustomEvent('config-changed', {
+      detail: { config: { ...this.config, view } },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
   render() {
     if (!this.hass || !this.config) {
       return html``;
     }
+
+    const currentView = this.config.view || DEFAULT_VIEW;
 
     return html`
       <div class="card-config">
@@ -608,6 +1170,21 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
             data-config-value="entity_prefix"
             @input=${this._valueChanged}
           />
+        </div>
+        <div class="field">
+          <label>View</label>
+          <div class="view-options">
+            ${VIEWS.map(
+              (view) => html`
+                <button
+                  class="view-option ${currentView === view.key ? 'active' : ''}"
+                  @click=${() => this._toggleView(view.key)}
+                >
+                  ${view.label}
+                </button>
+              `,
+            )}
+          </div>
         </div>
       </div>
     `;
@@ -636,6 +1213,23 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
         background: var(--card-background-color, #fff);
         color: var(--primary-text-color);
       }
+      .view-options {
+        display: flex;
+        gap: 8px;
+      }
+      .view-option {
+        padding: 6px 12px;
+        border-radius: 4px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        cursor: pointer;
+      }
+      .view-option.active {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        border-color: var(--primary-color);
+      }
     `;
   }
 }
@@ -657,7 +1251,7 @@ function defineCardElements() {
     window.customCards.push({
       type: CARD_TAG,
       name: 'KEBA Heat Pump Modbus',
-      description: 'Settings card for the KEBA Heat Pump Modbus integration',
+      description: 'Settings and schedule card for the KEBA Heat Pump Modbus integration',
       preview: true,
     });
   }
