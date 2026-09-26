@@ -30,11 +30,24 @@ WRITE_WARNING_WINDOW_SECONDS = 7 * 24 * 60 * 60
 DATA_COORDINATOR = "coordinator"
 DATA_REGISTERS = "registers"
 DATA_CLIENT = "client"
+DATA_SCHEDULE_MANAGER = "schedule_manager"
 
 # --- Bundled Lovelace card ---
 CARD_FILE_NAME = "keba-heat-pump-modbus-card.js"
 CARD_URL_PATH = f"/api/{DOMAIN}/{CARD_FILE_NAME}"
 CARD_REGISTERED_KEY = "card_registered"
+
+# --- Schedule ---
+SCHEDULE_STORAGE_VERSION = 1
+SCHEDULE_MAX_PLANS = 5
+SCHEDULE_ENTITY_PREFIX = "schedule"
+SERVICE_ADD_SCHEDULE = "add_schedule"
+SERVICE_REMOVE_SCHEDULE = "remove_schedule"
+SERVICE_SET_SCHEDULE_NAME = "set_schedule_name"
+SERVICE_SET_SCHEDULE_OFF_MODE = "set_schedule_off_mode"
+SERVICE_SET_SCHEDULE_ON_MODE = "set_schedule_on_mode"
+SERVICE_SET_SCHEDULE_HOUR = "set_schedule_hour"
+SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
 
 PLATFORMS = [
     Platform.SENSOR,

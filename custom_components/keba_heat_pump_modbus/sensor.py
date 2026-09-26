@@ -9,9 +9,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, DATA_COORDINATOR, DATA_REGISTERS, DEVICE_NAME_MAP
+from .const import DOMAIN, DATA_COORDINATOR, DATA_REGISTERS, DATA_SCHEDULE_MANAGER, DEVICE_NAME_MAP
 from .models import ModbusRegister
 from .coordinator import KebaCoordinator
+from .schedule import KebaScheduleManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +42,14 @@ async def async_setup_entry(
         "reflux_temperature",
     }.issubset(register_ids):
         entities.append(KebaFlowRateSensor(coordinator, entry))
+
+    manager: KebaScheduleManager | None = data.get(DATA_SCHEDULE_MANAGER)
+    if manager:
+        schedule_entities: List[SensorEntity] = []
+        await manager.async_setup_sensor_entities(
+            lambda e: schedule_entities.extend(e)
+        )
+        entities.extend(schedule_entities)
 
     async_add_entities(entities)
 

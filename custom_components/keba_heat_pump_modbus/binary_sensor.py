@@ -8,9 +8,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_COORDINATOR, DATA_REGISTERS, DEVICE_NAME_MAP, DOMAIN
+from .const import DATA_COORDINATOR, DATA_REGISTERS, DATA_SCHEDULE_MANAGER, DEVICE_NAME_MAP, DOMAIN
 from .coordinator import KebaCoordinator
 from .models import ModbusRegister
+from .schedule import KebaScheduleManager
 
 
 async def async_setup_entry(
@@ -23,12 +24,20 @@ async def async_setup_entry(
     coordinator: KebaCoordinator = data[DATA_COORDINATOR]
     registers: List[ModbusRegister] = data[DATA_REGISTERS]
 
-    entities: List[KebaBinarySensor] = []
+    entities: List[BinarySensorEntity] = []
 
     for reg in registers:
         if reg.entity_platform != "binary_sensor":
             continue
         entities.append(KebaBinarySensor(coordinator, entry, reg))
+
+    manager: KebaScheduleManager | None = data.get(DATA_SCHEDULE_MANAGER)
+    if manager:
+        schedule_entities: List[BinarySensorEntity] = []
+        await manager.async_setup_binary_sensor_entities(
+            lambda e: schedule_entities.extend(e)
+        )
+        entities.extend(schedule_entities)
 
     async_add_entities(entities)
 
