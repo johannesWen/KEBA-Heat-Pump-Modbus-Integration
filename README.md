@@ -50,7 +50,7 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 - **Scan interval**: How often (in seconds) the integration polls registers; configurable during setup and via options.
 - **heat_circuits_used**: Number of heating circuits your system has (1-4).
 
-## Dashboard Card
+## Lovelace
 
 This integration ships a bundled Lovelace card for quick access to the most common heat pump settings. The card source lives under [`frontend/`](frontend) and is built into `custom_components/keba_heat_pump_modbus/static/` at release time.
 
@@ -74,6 +74,10 @@ The card has two views:
 
 - **Settings** — the default view with system/heat pump/hot water/heating circuit controls.
 - **Schedule** — define up to 5 time-based plans that switch the system operating mode automatically.
+
+| Settings view | Schedule view |
+|:---:|:---:|
+| ![KEBA heat pump card Settings view](assets/screenshots/Card_Settings.png) | ![KEBA heat pump card Schedule view](assets/screenshots/Card_Schedule.png) |
 
 ### Schedule view
 
