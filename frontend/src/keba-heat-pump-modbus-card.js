@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { live } from 'lit/directives/live.js';
 import { CARD_VERSION, INTEGRATION_DOMAIN } from 'virtual:integration-version';
+import { defineStatusCardElements } from './keba-heat-pump-modbus-status-card.js';
 
 const CARD_TAG = 'keba-heat-pump-modbus-card';
 const EDITOR_TAG = 'keba-heat-pump-modbus-card-editor';
@@ -1449,6 +1450,7 @@ function defineCardElements() {
   }
 
   window.customCards = window.customCards || [];
+  defineStatusCardElements();
   if (!window.customCards.some((card) => card.type === CARD_TAG)) {
     window.customCards.push({
       type: CARD_TAG,

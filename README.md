@@ -52,7 +52,7 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 
 ## Lovelace
 
-This integration ships a bundled Lovelace card for quick access to the most common heat pump settings. The card source lives under [`frontend/`](frontend) and is built into `custom_components/keba_heat_pump_modbus/static/` at release time.
+This integration ships Lovelace cards for heat pump settings, schedules, and temperature history. Their source lives under [`frontend/`](frontend) and is built into `custom_components/keba_heat_pump_modbus/static/` at release time.
 
 Once the integration is set up, the card is **auto-registered** with Home Assistant — no manual Lovelace `resources:` entry is required.
 
@@ -106,6 +106,26 @@ view: schedule
 
 > **After updating the integration** (via HACS or manually), **restart Home Assistant** before using new card features. The card is served fresh, but the loaded Python code only changes on restart.
 
+### Historical Status card
+
+Add **KEBA Heat Pump Status** from the dashboard card picker to plot temperatures for a selected device. The device selector includes the heat pump, system, hot-water tank, buffer tank, and configured heating circuits that have enabled temperature entities. Measured temperatures and absolute setpoints are included; temperature offsets are excluded. Renamed entities and customized device names are supported, and separate installations stay separate.
+
+```yaml
+type: custom:keba-heat-pump-modbus-status-card
+title: KEBA Temperature History
+time_window: today
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `title` | string | `KEBA Heat Pump Status` | Card title. |
+| `device_id` | string | Automatic | Initial Home Assistant registry device; choose it in the visual editor. Automatic selects the first available heat pump. |
+| `time_window` | string | `today` | Initial preset: `last_hour`, `last_3_hours`, `last_6_hours`, `today`, `yesterday`, `this_week`, or `this_month`. |
+
+The default **Today so far** runs from midnight to now. **Yesterday** covers the previous complete calendar day, **This week** starts Monday, and **This month** starts on the first day. Calendar boundaries use Home Assistant's configured time zone, including daylight-saving changes. Device and preset changes on the dashboard apply to that card session; the visual editor sets saved defaults. Open-ended windows refresh every minute, and **Refresh** reloads devices and history immediately.
+
+Home Assistant History must be enabled and the entities must be recorded. For week/month windows, older temperature sensor readings use hourly averages where long-term statistics are available. Detailed recorded history takes precedence over overlapping statistics. Number setpoints show retained recorded history; disabled entities, excluded recordings, and purged setpoints cannot be reconstructed. The card reports when it uses hourly averages or cannot retrieve older statistics. It does not change recorder settings or enable entities.
+
 ## Development
 
 ### Build the bundled card
@@ -124,16 +144,19 @@ For iterative development with rebuild-on-save:
 npm run watch
 ```
 
-### Check the schedule card
+### Check the cards
 
 After building the card, run the Chromium interaction checks from the repository root:
 
 ```bash
 uv run --with playwright==1.58.0 playwright install chromium
 uv run --with playwright==1.58.0 python frontend/tests/check_card.py
+uv run --with playwright==1.58.0 python frontend/tests/check_status_card.py
 ```
 
 These checks simulate Home Assistant states and service responses, without connecting to a heat pump. They cover adding and editing plans, the four-state hour cycle, hot-water controls, legacy plans, failed saves, the plan limit, unavailable entities, and narrow card layouts.
+
+Status checks cover device discovery, renamed entities, setpoints, multiple installations, time zones and daylight-saving boundaries, statistics fallback, errors and retries, stale responses, lifecycle cleanup, the editor, and narrow layouts. To check the real chart renderer, use the development Home Assistant stack below; its dashboard includes the Status card.
 
 ### Local Home Assistant
 
