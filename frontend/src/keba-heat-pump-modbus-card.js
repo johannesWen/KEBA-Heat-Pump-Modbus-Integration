@@ -1,10 +1,9 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { live } from 'lit/directives/live.js';
-import { CARD_VERSION } from 'virtual:integration-version';
+import { CARD_VERSION, INTEGRATION_DOMAIN } from 'virtual:integration-version';
 
 const CARD_TAG = 'keba-heat-pump-modbus-card';
 const EDITOR_TAG = 'keba-heat-pump-modbus-card-editor';
-const DEFAULT_PREFIX = 'keba_heat_pump_modbus';
 const DEFAULT_VIEW = 'settings';
 
 const VIEWS = [
@@ -54,11 +53,11 @@ class KebaHeatPumpModbusCard extends LitElement {
 
   setConfig(config) {
     this.config = {
-      entity_prefix: DEFAULT_PREFIX,
       title: 'KEBA Heat Pump',
       view: DEFAULT_VIEW,
       ...config,
     };
+    delete this.config.entity_prefix;
     this._currentView = this.config.view || DEFAULT_VIEW;
   }
 
@@ -71,7 +70,7 @@ class KebaHeatPumpModbusCard extends LitElement {
   }
 
   static getStubConfig() {
-    return { entity_prefix: DEFAULT_PREFIX, title: 'KEBA Heat Pump', view: DEFAULT_VIEW };
+    return { title: 'KEBA Heat Pump', view: DEFAULT_VIEW };
   }
 
   static _escapeRegExp(text) {
@@ -80,7 +79,7 @@ class KebaHeatPumpModbusCard extends LitElement {
 
   _eid(domain, key) {
     const states = this.hass?.states;
-    const exact = `${domain}.${this.config.entity_prefix}_${key}`;
+    const exact = `${domain}.${INTEGRATION_DOMAIN}_${key}`;
     if (!states) return exact;
 
     // Primary: the integration exposes the register unique_id as the
@@ -108,7 +107,7 @@ class KebaHeatPumpModbusCard extends LitElement {
     }
 
     const wanted = KebaHeatPumpModbusCard._escapeRegExp(
-      `${this.config.entity_prefix}_${key}`,
+      `${INTEGRATION_DOMAIN}_${key}`,
     );
     const reStrict = new RegExp(`^${domain}\.${wanted}(?:_\d+)?$`);
     const reLoose = new RegExp(`^${domain}\..*${wanted}(?:_\d+)?$`);
@@ -144,8 +143,8 @@ class KebaHeatPumpModbusCard extends LitElement {
     if (candidates.length === 1) return candidates[0][0];
 
     candidates.sort((a, b) => {
-      const aHas = a[0].includes(this.config.entity_prefix) ? 0 : 1;
-      const bHas = b[0].includes(this.config.entity_prefix) ? 0 : 1;
+      const aHas = a[0].includes(INTEGRATION_DOMAIN) ? 0 : 1;
+      const bHas = b[0].includes(INTEGRATION_DOMAIN) ? 0 : 1;
       if (aHas !== bHas) return aHas - bHas;
       return a[0].length - b[0].length || a[0].localeCompare(b[0]);
     });
@@ -166,12 +165,11 @@ class KebaHeatPumpModbusCard extends LitElement {
     // Prefer entities whose id contains the integration domain so we do not
     // accidentally pick an unrelated entity that happens to share the key.
     const branded = candidates.filter((entityId) =>
-      entityId.includes(DEFAULT_PREFIX),
+      entityId.includes(INTEGRATION_DOMAIN),
     );
     const pool = branded.length > 0 ? branded : candidates;
 
-    // If multiple instances exist, pick the shortest id as the most canonical
-    // one. The user can override via the entity_prefix card option.
+    // If multiple instances exist, pick the shortest id as the most canonical one.
     pool.sort((a, b) => a.length - b.length || a.localeCompare(b));
     return pool[0];
   }
@@ -493,8 +491,8 @@ class KebaHeatPumpModbusCard extends LitElement {
     return this._state('sensor', 'schedules');
   }
 
-  _getOperatingModeOptions() {
-    const state = this._state('select', 'operating_mode');
+  _getOperatingModeOptions(key = 'operating_mode') {
+    const state = this._state('select', key);
     return state?.attributes?.options || [];
   }
 
@@ -504,6 +502,10 @@ class KebaHeatPumpModbusCard extends LitElement {
     return Object.entries(plansAttr)
       .map(([planId, data]) => ({
         planId: Number(planId),
+        hot_water_enabled: false,
+        hot_water_off_mode: 'Off',
+        hot_water_on_mode: 'On',
+        hot_water_on_hours: [],
         ...data,
       }))
       .sort((a, b) => a.planId - b.planId);
@@ -520,7 +522,7 @@ class KebaHeatPumpModbusCard extends LitElement {
     this._pending = true;
     try {
       await this._callService(
-        'keba_heat_pump_modbus',
+        INTEGRATION_DOMAIN,
         service,
         { entity_id: this._schedulesEntityId(), ...data },
         (err) => {
@@ -552,16 +554,24 @@ class KebaHeatPumpModbusCard extends LitElement {
     this._callScheduleService('set_schedule_enabled', { plan_id: planId, enabled });
   }
 
-  _setPlanOffMode(planId, offMode) {
-    this._callScheduleService('set_schedule_off_mode', { plan_id: planId, off_mode: offMode });
+  _setPlanOffMode(planId, offMode, hotWater = false) {
+    this._callScheduleService(hotWater ? 'set_schedule_hot_water_off_mode' : 'set_schedule_off_mode', { plan_id: planId, off_mode: offMode });
   }
 
-  _setPlanOnMode(planId, onMode) {
-    this._callScheduleService('set_schedule_on_mode', { plan_id: planId, on_mode: onMode });
+  _setPlanOnMode(planId, onMode, hotWater = false) {
+    this._callScheduleService(hotWater ? 'set_schedule_hot_water_on_mode' : 'set_schedule_on_mode', { plan_id: planId, on_mode: onMode });
   }
 
-  _setPlanHour(planId, hour, on) {
-    this._callScheduleService('set_schedule_hour', { plan_id: planId, hour, on });
+  _cyclePlanHour(plan, hour) {
+    const heating = (plan.on_hours || []).includes(hour);
+    const data = { plan_id: plan.planId, hour, on: !heating };
+    if (plan.hot_water_enabled) {
+      const hotWater = (plan.hot_water_on_hours || []).includes(hour);
+      const next = ((heating ? 1 : 0) + (hotWater ? 2 : 0) + 1) % 4;
+      data.on = Boolean(next & 1);
+      data.hot_water_on = Boolean(next & 2);
+    }
+    this._callScheduleService('set_schedule_hour', data);
   }
 
   _setPlanWeekday(planId, weekday, selected) {
@@ -572,6 +582,8 @@ class KebaHeatPumpModbusCard extends LitElement {
     const active = this._val('binary_sensor', 'schedule_active');
     const scheduledMode = this._val('sensor', 'scheduled_mode');
     const operatingMode = this._val('select', 'operating_mode');
+    const scheduledHotWater = this._state('sensor', 'scheduled_mode')?.attributes?.hot_water_mode;
+    const currentHotWater = this._val('select', 'operating_mode_dhw_tank1');
     return html`
       <div class="schedule-status">
         <div class="status-item">
@@ -582,7 +594,7 @@ class KebaHeatPumpModbusCard extends LitElement {
           ? html`
               <div class="status-item">
                 <ha-icon icon="mdi:calendar-check"></ha-icon>
-                <span>Scheduled: ${scheduledMode}</span>
+                <span>Heating scheduled: ${scheduledMode}</span>
               </div>
             `
           : nothing}
@@ -590,9 +602,15 @@ class KebaHeatPumpModbusCard extends LitElement {
           ? html`
               <div class="status-item">
                 <ha-icon icon="mdi:cog"></ha-icon>
-                <span>Current: ${operatingMode}</span>
+                <span>Heating current: ${operatingMode}</span>
               </div>
             `
+          : nothing}
+        ${scheduledHotWater
+          ? html`<div class="status-item"><ha-icon icon="mdi:water-boiler"></ha-icon><span>Hot water scheduled: ${scheduledHotWater}</span></div>`
+          : nothing}
+        ${currentHotWater && !['unknown', 'unavailable'].includes(currentHotWater)
+          ? html`<div class="status-item"><ha-icon icon="mdi:water-boiler"></ha-icon><span>Hot water current: ${currentHotWater}</span></div>`
           : nothing}
       </div>
     `;
@@ -629,22 +647,27 @@ class KebaHeatPumpModbusCard extends LitElement {
 
   _renderHourGrid(plan) {
     const onHours = new Set(plan.on_hours || []);
+    const hotWaterHours = new Set(plan.hot_water_enabled ? plan.hot_water_on_hours : []);
     return html`
-      <div class="hour-grid" role="group" aria-label="On hours">
-        ${HOURS.map(
-          (h) => html`
+      <div class="hour-grid" role="group" aria-label="Scheduled hours">
+        ${HOURS.map((h) => {
+          const heating = onHours.has(h);
+          const hotWater = hotWaterHours.has(h);
+          const mode = heating ? (hotWater ? 'both' : 'heat') : (hotWater ? 'hot-water' : 'off');
+          const label = `${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00: heating ${heating ? 'on' : 'off'}, hot water ${plan.hot_water_enabled ? (hotWater ? 'on' : 'off') : 'unmanaged'}`;
+          return html`
             <button
               type="button"
-              aria-pressed=${onHours.has(h)}
-              aria-label="${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00"
-              class="hour-chip ${onHours.has(h) ? 'on' : ''}"
-              @click=${() => this._setPlanHour(plan.planId, h, !onHours.has(h))}
-              title="${String(h).padStart(2, '0')}:00"
+              aria-pressed=${heating || hotWater}
+              aria-label=${label}
+              class="hour-chip ${mode}"
+              @click=${() => this._cyclePlanHour(plan, h)}
+              title=${label}
             >
               ${String(h).padStart(2, '0')}
             </button>
-          `,
-        )}
+          `;
+        })}
       </div>
     `;
   }
@@ -724,10 +747,38 @@ class KebaHeatPumpModbusCard extends LitElement {
     `;
   }
 
-  _renderPlanCard(plan, modeOptions) {
-    const displayName = plan.name || `Plan ${plan.planId}`;
+  _renderPlanModes(plan, hotWater = false) {
+    const title = hotWater ? 'Hot water' : 'Heating';
+    const offMode = hotWater ? plan.hot_water_off_mode : plan.off_mode;
+    const onMode = hotWater ? plan.hot_water_on_mode : plan.on_mode;
+    const modeOptions = this._getOperatingModeOptions(hotWater ? 'operating_mode_dhw_tank1' : 'operating_mode');
     // Keep saved modes visible even while the operating-mode entity is unavailable.
-    const options = [...new Set([...modeOptions, plan.off_mode, plan.on_mode])].filter(Boolean);
+    const options = [...new Set([...modeOptions, offMode, onMode])].filter(Boolean);
+    return html`
+      <div class="hours-heading mode-heading">${title}</div>
+      <div class="plan-modes">
+        <label class="mode-field">
+          <span class="control-label">Off mode <small>Outside selected hours</small></span>
+          <select class="ha-select" aria-label="${title} Off mode"
+            .value=${live(offMode)}
+            @change=${(e) => this._setPlanOffMode(plan.planId, e.target.value, hotWater)}>
+            ${options.map((opt) => html`<option value=${opt} ?selected=${opt === offMode}>${opt}</option>`)}
+          </select>
+        </label>
+        <label class="mode-field">
+          <span class="control-label">On mode <small>During selected hours</small></span>
+          <select class="ha-select" aria-label="${title} On mode"
+            .value=${live(onMode)}
+            @change=${(e) => this._setPlanOnMode(plan.planId, e.target.value, hotWater)}>
+            ${options.map((opt) => html`<option value=${opt} ?selected=${opt === onMode}>${opt}</option>`)}
+          </select>
+        </label>
+      </div>
+    `;
+  }
+
+  _renderPlanCard(plan) {
+    const displayName = plan.name || `Plan ${plan.planId}`;
     return html`
       <fieldset class="plan-card ${plan.enabled ? 'enabled' : ''}" ?disabled=${this._pending}>
         <legend class="sr-only">${displayName}</legend>
@@ -767,39 +818,34 @@ class KebaHeatPumpModbusCard extends LitElement {
           </div>
         </div>
         ${this._renderWeekdayGrid(plan)}
-        <div class="plan-modes">
-          <label class="mode-field">
-            <span class="control-label">Off mode <small>Outside selected hours</small></span>
-            <select
-              class="ha-select"
-              .value=${live(plan.off_mode)}
-              @change=${(e) => this._setPlanOffMode(plan.planId, e.target.value)}
-            >
-              ${options.map((opt) => html`<option value=${opt} ?selected=${opt === plan.off_mode}>${opt}</option>`)}
-            </select>
-          </label>
-          <label class="mode-field">
-            <span class="control-label">On mode <small>During selected hours</small></span>
-            <select
-              class="ha-select"
-              .value=${live(plan.on_mode)}
-              @change=${(e) => this._setPlanOnMode(plan.planId, e.target.value)}
-            >
-              ${options.map((opt) => html`<option value=${opt} ?selected=${opt === plan.on_mode}>${opt}</option>`)}
-            </select>
-          </label>
-        </div>
+        ${this._renderPlanModes(plan)}
+        <label class="plan-toggle hot-water-toggle">
+          <input type="checkbox" role="switch" aria-label="Schedule hot water"
+            .checked=${live(Boolean(plan.hot_water_enabled))}
+            @change=${(e) => this._callScheduleService('set_schedule_hot_water_enabled', { plan_id: plan.planId, enabled: e.target.checked })} />
+          <span>Schedule hot water</span>
+        </label>
+        ${plan.hot_water_enabled ? this._renderPlanModes(plan, true) : nothing}
         <div class="plan-hours">
           <div class="hours-heading">
-            <span>Daily on hours</span>
-            <span class="muted">${(plan.on_hours || []).length} / 24 h</span>
+            <span>Daily hours</span>
           </div>
           ${this._renderHourGrid(plan)}
-          <p class="hour-summary">${this._hourSummary(plan.on_hours)}</p>
+          <p class="hour-summary">Heating: ${this._hourSummary(plan.on_hours)}</p>
+          ${plan.hot_water_enabled
+            ? html`<p class="hour-summary">Hot water: ${this._hourSummary(plan.hot_water_on_hours)}</p>`
+            : nothing}
           <div class="hour-legend">
-            <span><i class="legend-dot selected"></i>On mode</span>
-            <span><i class="legend-dot"></i>Off mode</span>
+            <span><i class="legend-dot heat"></i>Heating</span>
+            ${plan.hot_water_enabled ? html`
+              <span><i class="legend-dot hot-water"></i>Hot water</span>
+              <span><i class="legend-dot both"></i>Both</span>
+            ` : nothing}
+            <span><i class="legend-dot"></i>${plan.hot_water_enabled ? 'All off' : 'Heating off'}</span>
           </div>
+          <p class="weekday-hint">${plan.hot_water_enabled
+            ? 'Click an hour to cycle: Heating → Hot water → Both → All off. Off uses your configured Off modes.'
+            : 'Click an hour to toggle heating. Hot water is unmanaged.'}</p>
         </div>
       </fieldset>
     `;
@@ -818,7 +864,6 @@ class KebaHeatPumpModbusCard extends LitElement {
     }
 
     const plans = this._getPlans();
-    const modeOptions = this._getOperatingModeOptions();
     const maxPlans = state.attributes?.max_plans || 5;
     const canAdd = plans.length < maxPlans;
     const selectedPlan = this._selectedPlan(plans);
@@ -861,18 +906,18 @@ class KebaHeatPumpModbusCard extends LitElement {
           tabindex="0"
           aria-busy=${this._pending}
         >
-          ${this._renderPlanCard(selectedPlan, modeOptions)}
+          ${this._renderPlanCard(selectedPlan)}
         </div>
       ` : nothing}
       ${plans.length === 0
         ? html`<div class="empty-state">
             <ha-icon icon="mdi:calendar-clock-outline"></ha-icon>
             <strong>Set your daily rhythm</strong>
-            <p>Add your first plan, choose two operating modes, then select the hours to switch between them.</p>
+            <p>Add your first plan, choose heating and hot-water modes, then click hours to set your daily rhythm.</p>
           </div>`
         : html`<p class="schedule-hint priority-note">
-            Lower plan numbers have priority when selected hours overlap. Outside all selected hours,
-            the lowest-numbered enabled plan supplies the Off mode.
+            Heating and hot water have separate priorities. For each, lower plan numbers win overlapping
+            On hours; otherwise the lowest-numbered eligible plan supplies its Off mode.
           </p>`}
     `;
   }
@@ -1038,6 +1083,8 @@ class KebaHeatPumpModbusCard extends LitElement {
       /* Schedule controls follow the dashboard theme and the card's own width. */
       :host {
         container-type: inline-size;
+        --schedule-heat-color: #1565c0;
+        --schedule-hot-water-color: #c62828;
       }
       button, input, select {
         font: inherit;
@@ -1217,6 +1264,8 @@ class KebaHeatPumpModbusCard extends LitElement {
       .weekday-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
       .weekday-hint { margin: 7px 0 0; color: var(--secondary-text-color); font-size: 11px; }
       .plan-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+      .mode-heading { font-weight: 600; }
+      .hot-water-toggle { margin-bottom: 16px; }
       .mode-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; }
       .mode-field small { display: block; color: var(--secondary-text-color); font-size: 11px; margin-top: 2px; }
       .mode-field select { width: 100%; min-width: 0; min-height: 44px; border-radius: 6px; }
@@ -1235,17 +1284,20 @@ class KebaHeatPumpModbusCard extends LitElement {
         cursor: pointer;
       }
       .hour-chip:hover:not(:disabled), .day-chip:hover:not(:disabled) { border-color: var(--primary-color); }
-      .hour-chip.on, .day-chip.on {
+      .day-chip.on {
         background: var(--primary-color);
         color: var(--text-primary-color, #fff);
         border-color: var(--primary-color);
         font-weight: 700;
       }
+      .hour-chip.heat, .legend-dot.heat { background: var(--schedule-heat-color); border-color: var(--schedule-heat-color); }
+      .hour-chip.hot-water, .legend-dot.hot-water { background: var(--schedule-hot-water-color); border-color: var(--schedule-hot-water-color); }
+      .hour-chip.both, .legend-dot.both { background: linear-gradient(to right, var(--schedule-heat-color) 50%, var(--schedule-hot-water-color) 50%); border-color: var(--schedule-heat-color); }
+      .hour-chip.heat, .hour-chip.hot-water, .hour-chip.both { color: #fff; font-weight: 700; }
       .hour-summary { margin: 10px 0 6px; font-variant-numeric: tabular-nums; }
       .hour-legend, .hour-legend span { display: flex; align-items: center; gap: 6px; }
-      .hour-legend { gap: 16px; font-size: 11px; color: var(--secondary-text-color); }
+      .hour-legend { flex-wrap: wrap; gap: 8px 16px; font-size: 11px; color: var(--secondary-text-color); }
       .legend-dot { width: 8px; height: 8px; border-radius: 2px; background: var(--secondary-background-color, #f5f5f5); border: 1px solid var(--divider-color, #e0e0e0); }
-      .legend-dot.selected { background: var(--primary-color); border-color: var(--primary-color); }
       .priority-note { padding: 0 2px; }
       .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 28px 16px; border: 1px dashed var(--divider-color, #e0e0e0); border-radius: 10px; }
       .empty-state ha-icon { --mdc-icon-size: 32px; color: var(--primary-color); margin-bottom: 12px; }
@@ -1273,7 +1325,8 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
   }
 
   setConfig(config) {
-    this.config = config;
+    this.config = { ...config };
+    delete this.config.entity_prefix;
   }
 
   _valueChanged(ev) {
@@ -1317,16 +1370,6 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
             type="text"
             .value=${this.config.title || ''}
             data-config-value="title"
-            @input=${this._valueChanged}
-          />
-        </div>
-        <div class="field">
-          <label for="entity_prefix">Entity prefix</label>
-          <input
-            id="entity_prefix"
-            type="text"
-            .value=${this.config.entity_prefix || DEFAULT_PREFIX}
-            data-config-value="entity_prefix"
             @input=${this._valueChanged}
           />
         </div>

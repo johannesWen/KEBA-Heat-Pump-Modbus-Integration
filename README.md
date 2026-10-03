@@ -61,19 +61,19 @@ Add the card from the Lovelace UI (**Add Card** → search for **KEBA Heat Pump 
 ```yaml
 type: custom:keba-heat-pump-modbus-card
 title: KEBA Heat Pump
-entity_prefix: keba_heat_pump_modbus
 ```
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `title` | string | `KEBA Heat Pump` | Card title shown in the dashboard. |
-| `entity_prefix` | string | `keba_heat_pump_modbus` | Entity id prefix used to resolve integration entities. |
 | `view` | string | `settings` | Card view: `settings` or `schedule`. |
+
+The integration defines the entity prefix internally. The card automatically finds integration entities, including renamed entities; no prefix setting is needed.
 
 The card has two views:
 
 - **Settings** — the default view with system/heat pump/hot water/heating circuit controls.
-- **Schedule** — define up to 5 time-based plans that switch the system operating mode automatically.
+- **Schedule** — define up to 5 time-based plans that switch heating and hot-water operating modes automatically.
 
 | Settings view | Schedule view |
 |:---:|:---:|
@@ -81,22 +81,26 @@ The card has two views:
 
 ### Schedule view
 
-Use the Schedule view to create plans that change the heat pump's system operating mode by hour of day. Each plan appears in its own tab; select a tab to edit that plan. The hour grid shows all 24 hours in a compact, responsive layout.
+Use the Schedule view to create plans that change heating and hot-water operating modes by hour of day. Each plan appears in its own tab; select a tab to edit it. The hour grid shows all 24 hours in a compact, responsive layout.
 
 Each plan has:
 
-- **Active days** — select Mon–Sun; an empty selection runs every day. A plan is ignored on other days, including its Off mode.
-- **Off mode** — operating mode used outside the selected hours (e.g. `Hot Water`).
-- **On mode** — operating mode used during the selected hours (e.g. `Auto Heat`).
-- **On hours** — 24 toggle buttons, one per hour on active days. A Monday-only plan does not carry past midnight into Tuesday.
-- **Enabled** — activate or deactivate the plan.
+- **Active days** — select Mon–Sun; an empty selection runs every day. A plan is ignored on other days, including its Off modes.
+- **Heating Off / On mode** — system operating modes outside and during heating hours (defaults: `Hot Water` / `Auto Heat`).
+- **Schedule hot water** — enable independent control of the hot-water device’s Operating Mode. New plans enable it; existing plans remain heating-only until you enable it. Disabling it retains saved hot-water hours; other eligible plans may still control hot water. With none eligible, its current mode is left unchanged.
+- **Hot-water Off / On mode** — choose from `Off`, `Auto`, `On`, or `Heat Up` (defaults: `Off` / `On`).
+- **Daily hours** — successive clicks cycle from all off to heating only (blue), hot water only (red), both (half blue / half red), then all off (neutral). “All off” applies the configured Off modes. With hot-water scheduling disabled, clicks toggle heating only.
+- **Enabled** — activate or pause the whole plan.
 
-Up to 5 plans can be defined. Multiple plans can be enabled at the same time; plans are evaluated by plan number, with plan 1 having the highest priority. If any enabled plan eligible today has the current hour selected, its On mode wins. Otherwise the Off mode of the lowest-numbered enabled plan eligible today is used. If none applies today, the current operating mode is left unchanged. Changes apply immediately. The scheduler sends a mode command only when the selected mode changes, including changes between Off and On hours. It retries a failed change, but does not resend the same mode for every selected hour. A manual operating-mode change during a scheduled period remains until the next scheduled mode transition. Plans repeat daily using Home Assistant’s configured time zone. The card shows the selected time ranges, saving status, and any service errors.
+Up to 5 plans can be defined. Heating and hot water resolve priority independently: the lowest-numbered enabled plan eligible today with that function selected supplies its On mode. Otherwise the lowest-numbered eligible plan controlling that function supplies its Off mode. If none applies, that device’s mode is left unchanged. A Monday-only plan does not carry past midnight into Tuesday.
+
+Changes apply immediately. Each hour click saves both selections together. The scheduler sends commands only when the selected mode changes, retries failures independently, and does not resend the same mode every hour. Manual mode changes remain until the next scheduled mode transition. Plans use Home Assistant’s configured time zone. The card shows separate time ranges and scheduled/current modes for heating and hot water, saving status, and service errors.
+
+For automations, `set_schedule_hour` retains its heating `on` boolean and accepts an optional `hot_water_on` boolean; omitting it preserves the hot-water selection. The services `set_schedule_hot_water_enabled`, `set_schedule_hot_water_off_mode`, and `set_schedule_hot_water_on_mode` use the same schedules `entity_id` and `plan_id`, with `enabled`, `off_mode`, and `on_mode` respectively. The Scheduled Mode sensor retains its heating state and exposes the hot-water target as the `hot_water_mode` attribute.
 
 ```yaml
 type: custom:keba-heat-pump-modbus-card
 title: KEBA Heat Pump Schedule
-entity_prefix: keba_heat_pump_modbus
 view: schedule
 ```
 
@@ -129,7 +133,7 @@ uv run --with playwright==1.58.0 playwright install chromium
 uv run --with playwright==1.58.0 python frontend/tests/check_card.py
 ```
 
-These checks simulate Home Assistant states and service responses, without connecting to a heat pump. They cover adding and editing plans, failed saves, the plan limit, unavailable entities, and narrow card layouts.
+These checks simulate Home Assistant states and service responses, without connecting to a heat pump. They cover adding and editing plans, the four-state hour cycle, hot-water controls, legacy plans, failed saves, the plan limit, unavailable entities, and narrow card layouts.
 
 ### Local Home Assistant
 

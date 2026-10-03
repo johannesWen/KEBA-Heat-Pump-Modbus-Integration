@@ -147,7 +147,7 @@ set_schedule_on_mode:
 
 set_schedule_hour:
   name: Set schedule hour
-  description: Add or remove an hour from a plan's on-hours.
+  description: Set heating and optionally hot-water selections for an hour in one update.
   fields:
     entity_id:
       name: Schedules entity
@@ -177,8 +177,13 @@ set_schedule_hour:
           mode: box
     "on":
       name: "On"
-      description: True to add the hour, false to remove it.
+      description: True for heating On mode, false for heating Off mode.
       required: true
+      selector:
+        boolean:
+    hot_water_on:
+      name: Hot water on
+      description: True for hot-water On mode, false for Off mode. Omit to retain the saved selection.
       selector:
         boolean:
 
@@ -218,3 +223,97 @@ set_schedule_weekday:
       required: true
       selector:
         boolean:
+
+set_schedule_hot_water_enabled:
+  name: Enable or disable hot-water scheduling
+  description: Enable or disable hot-water control for a plan. Other eligible plans may still control hot water.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to enable or disable (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    enabled:
+      name: Enabled
+      description: Whether the plan should control hot water.
+      required: true
+      selector:
+        boolean:
+
+set_schedule_hot_water_off_mode:
+  name: Set schedule hot-water off mode
+  description: Set the hot-water operating mode used outside the plan's on-hours.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to update (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    off_mode:
+      name: Off mode
+      description: Hot-water operating mode to use outside the on-hours.
+      required: true
+      selector:
+        select:
+          options:
+            - "Off"
+            - Auto
+            - "On"
+            - Heat Up
+
+set_schedule_hot_water_on_mode:
+  name: Set schedule hot-water on mode
+  description: Set the hot-water operating mode used during the plan's on-hours.
+  fields:
+    entity_id:
+      name: Schedules entity
+      description: The schedules sensor entity for this KEBA integration.
+      required: true
+      selector:
+        entity:
+          integration: keba_heat_pump_modbus
+          domain: sensor
+    plan_id:
+      name: Plan ID
+      description: ID of the plan to update (1-5).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          mode: box
+    on_mode:
+      name: On mode
+      description: Hot-water operating mode to use during the on-hours.
+      required: true
+      selector:
+        select:
+          options:
+            - "Off"
+            - Auto
+            - "On"
+            - Heat Up

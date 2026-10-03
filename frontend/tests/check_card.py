@@ -32,6 +32,7 @@ customElements.define('ha-card', class extends HTMLElement {
 });
 const entityId = 'sensor.renamed_schedules';
 const plans = {};
+window.plans = plans;
 window.calls = [];
 window.failNext = false;
 window.holdNext = false;
@@ -51,14 +52,24 @@ const hass = {
     const plan = plans[data.plan_id];
     if (service === 'add_schedule') {
       const id = [1,2,3,4,5].find(id => !plans[id]);
-      plans[id] = { name: '', enabled: true, off_mode: 'Hot Water', on_mode: 'Auto Heat', on_hours: [], weekdays: [] };
+      plans[id] = { name: '', enabled: true, off_mode: 'Hot Water', on_mode: 'Auto Heat', on_hours: [], weekdays: [], hot_water_enabled: true, hot_water_off_mode: 'Off', hot_water_on_mode: 'On', hot_water_on_hours: [] };
     } else if (service === 'remove_schedule') { delete plans[data.plan_id]; }
     else if (service === 'set_schedule_hour') {
-      plan.on_hours = data.on ? [...plan.on_hours, data.hour] : plan.on_hours.filter(h => h !== data.hour);
+      plan.on_hours = data.on ? [...new Set([...plan.on_hours, data.hour])] : plan.on_hours.filter(h => h !== data.hour);
+      if ('hot_water_on' in data) {
+        const hours = plan.hot_water_on_hours || [];
+        plan.hot_water_on_hours = data.hot_water_on ? [...new Set([...hours, data.hour])] : hours.filter(h => h !== data.hour);
+      }
     } else if (service === 'set_schedule_weekday') {
       plan.weekdays = data.selected
         ? [...new Set([...plan.weekdays, data.weekday])].sort((a, b) => a - b)
         : plan.weekdays.filter(day => day !== data.weekday);
+    } else if (service === 'set_schedule_hot_water_enabled') {
+      plan.hot_water_enabled = data.enabled;
+    } else if (service === 'set_schedule_hot_water_off_mode') {
+      plan.hot_water_off_mode = data.off_mode;
+    } else if (service === 'set_schedule_hot_water_on_mode') {
+      plan.hot_water_on_mode = data.on_mode;
     } else {
       const field = service.replace('set_schedule_', '');
       plan[field] = data[field];
@@ -70,6 +81,8 @@ window.publish = () => {
   hass.states = {
     [entityId]: { entity_id: entityId, state: String(Object.keys(plans).length), attributes: { keba_key: 'schedules', plans: structuredClone(plans) } },
     'select.system': { entity_id: 'select.system', state: 'Hot Water', attributes: { keba_key: 'operating_mode', options: ['Standby', 'Hot Water', 'Auto Heat', 'Full Auto'] } },
+    'select.hot_water': { entity_id: 'select.hot_water', state: 'Auto', attributes: { keba_key: 'operating_mode_dhw_tank1', options: ['Off', 'Auto', 'On', 'Heat Up'] } },
+    'sensor.scheduled': { entity_id: 'sensor.scheduled', state: 'Auto Heat', attributes: { keba_key: 'scheduled_mode', hot_water_mode: 'On' } },
     'binary_sensor.active': { entity_id: 'binary_sensor.active', state: Object.values(plans).some(p => p.enabled) ? 'on' : 'off', attributes: { keba_key: 'schedule_active' } }
   };
   card.hass = {...hass};
@@ -116,6 +129,36 @@ class CardTests(unittest.TestCase):
             "domain": "keba_heat_pump_modbus", "service": "add_schedule",
             "data": {"entity_id": "sensor.renamed_schedules"},
         }])
+
+    def test_prefix_is_internal_and_editor_removes_legacy_setting(self):
+        config = {"view": "schedule", "title": "My heat pump", "entity_prefix": "old_custom_prefix"}
+        self.page.evaluate("config => card.setConfig(config)", config)
+        self.assertNotIn("entity_prefix", self.page.evaluate("card.config"))
+        self.assertNotIn("entity_prefix", self.page.evaluate("card.constructor.getStubConfig()"))
+        self.add.click()
+        self.assertEqual(self.page.evaluate("window.calls.at(-1).data.entity_id"), "sensor.renamed_schedules")
+        self.assertEqual(self.page.evaluate("""() => {
+          const isolated = document.createElement('keba-heat-pump-modbus-card');
+          isolated.setConfig({entity_prefix: 'old_custom_prefix'});
+          return isolated._eid('select', 'operating_mode');
+        }"""), "select.keba_heat_pump_modbus_operating_mode")
+        self.page.evaluate("""config => {
+          const editor = card.constructor.getConfigElement();
+          editor.setConfig(config);
+          editor.hass = card.hass;
+          editor.addEventListener('config-changed', event => {
+            window.editedConfig = event.detail.config;
+            editor.setConfig(event.detail.config);
+          });
+          document.body.append(editor);
+        }""", config)
+        editor = self.page.locator("keba-heat-pump-modbus-card-editor")
+        expect(editor.get_by_label("Entity prefix")).to_have_count(0)
+        expect(editor.get_by_label("Title")).to_have_value("My heat pump")
+        editor.get_by_label("Title").fill("Updated title")
+        self.assertEqual(self.page.evaluate("window.editedConfig"), {"view": "schedule", "title": "Updated title"})
+        editor.get_by_role("button", name="Settings", exact=True).click()
+        self.assertEqual(self.page.evaluate("window.editedConfig"), {"view": "settings", "title": "Updated title"})
 
     def test_failed_add_shows_error_and_can_retry(self):
         self.page.evaluate("window.failNext = true")
@@ -183,11 +226,11 @@ class CardTests(unittest.TestCase):
         name.fill("Morning")
         name.press("Tab")
         expect(self.page.get_by_role("switch", name="Enable Morning")).to_be_visible()
-        self.page.get_by_label("On mode During selected hours").select_option("Full Auto")
-        hour = self.page.get_by_role("button", name="07:00–08:00", exact=True)
+        self.page.get_by_label("Heating On mode", exact=True).select_option("Full Auto")
+        hour = self.page.locator(".hour-chip").nth(7)
         hour.click()
         expect(hour).to_have_attribute("aria-pressed", "true")
-        expect(self.page.locator(".hour-summary")).to_have_text("07:00–08:00")
+        expect(self.page.locator(".hour-summary").first).to_have_text("Heating: 07:00–08:00")
         switch = self.page.get_by_role("switch", name="Enable Morning")
         self.page.evaluate("window.failNext = true")
         switch.click()
@@ -196,7 +239,124 @@ class CardTests(unittest.TestCase):
         switch.click()
         expect(switch).not_to_be_checked()
         self.page.get_by_role("button", name="Remove Morning").click()
-        expect(self.page.get_by_text("Set your daily rhythm")).to_be_visible()
+        expect(self.page.get_by_text("Set your daily rhythm", exact=True)).to_be_visible()
+
+    def test_hour_cycle_colors_atomic_payloads_and_keyboard(self):
+        self.add.click()
+        hour = self.page.locator(".hour-chip").nth(7)
+        for mode, heating, hot_water, color in [
+            ("heat", True, False, "rgb(21, 101, 192)"),
+            ("hot-water", False, True, "rgb(198, 40, 40)"),
+            ("both", True, True, None),
+            ("off", False, False, None),
+        ]:
+            hour.click()
+            expect(hour).to_have_class(f"hour-chip {mode}")
+            expect(hour).to_have_attribute("aria-label", f"07:00–08:00: heating {'on' if heating else 'off'}, hot water {'on' if hot_water else 'off'}")
+            self.assertEqual(self.page.evaluate("window.calls.at(-1)"), {
+                "domain": "keba_heat_pump_modbus", "service": "set_schedule_hour",
+                "data": {"entity_id": "sensor.renamed_schedules", "plan_id": 1,
+                         "hour": 7, "on": heating, "hot_water_on": hot_water},
+            })
+            self.assertEqual(self.page.evaluate("window.plans[1].on_hours"), [7] if heating else [])
+            self.assertEqual(self.page.evaluate("window.plans[1].hot_water_on_hours"), [7] if hot_water else [])
+            if color:
+                self.assertEqual(hour.evaluate("node => getComputedStyle(node).backgroundColor"), color)
+            if mode == "both":
+                self.assertEqual(hour.evaluate("node => getComputedStyle(node).backgroundImage"),
+                                 "linear-gradient(to right, rgb(21, 101, 192) 50%, rgb(198, 40, 40) 50%)")
+        self.assertEqual(self.page.evaluate("window.calls.filter(c => c.service === 'set_schedule_hour').length"), 4)
+        hour.focus()
+        hour.press("Enter")
+        expect(hour).to_have_class("hour-chip heat")
+        hour.press("Space")
+        expect(hour).to_have_class("hour-chip hot-water")
+        expect(self.page.locator(".hour-summary").nth(1)).to_have_text("Hot water: 07:00–08:00")
+        self.page.evaluate("window.publish()")
+        expect(hour).to_have_class("hour-chip hot-water")
+
+    def test_hot_water_modes_and_disable_retains_selections(self):
+        self.add.click()
+        switch = self.page.get_by_role("switch", name="Schedule hot water")
+        expect(switch).to_be_checked()
+        off = self.page.get_by_label("Hot water Off mode", exact=True)
+        on = self.page.get_by_label("Hot water On mode", exact=True)
+        expect(off).to_have_value("Off")
+        expect(on).to_have_value("On")
+        self.assertEqual(on.locator("option").all_text_contents(), ["Off", "Auto", "On", "Heat Up"])
+        off.select_option("Auto")
+        on.select_option("Heat Up")
+        self.assertEqual(self.page.evaluate("window.calls.slice(-2).map(c => [c.service, c.data])"), [
+            ["set_schedule_hot_water_off_mode", {"entity_id": "sensor.renamed_schedules", "plan_id": 1, "off_mode": "Auto"}],
+            ["set_schedule_hot_water_on_mode", {"entity_id": "sensor.renamed_schedules", "plan_id": 1, "on_mode": "Heat Up"}],
+        ])
+        hour = self.page.locator(".hour-chip").nth(8)
+        hour.click()
+        hour.click()
+        expect(hour).to_have_class("hour-chip hot-water")
+        self.page.evaluate("window.failNext = true")
+        switch.click()
+        expect(switch).to_be_checked()
+        expect(self.page.get_by_role("alert")).to_contain_text("Connection lost")
+        switch.click()
+        expect(switch).not_to_be_checked()
+        expect(hour).to_have_class("hour-chip off")
+        expect(on).to_have_count(0)
+        hour.click()
+        expect(hour).to_have_class("hour-chip heat")
+        self.assertNotIn("hot_water_on", self.page.evaluate("window.calls.at(-1).data"))
+        self.assertEqual(self.page.evaluate("window.plans[1].hot_water_on_hours"), [8])
+        switch.click()
+        expect(hour).to_have_class("hour-chip both")
+        expect(off).to_have_value("Auto")
+        expect(on).to_have_value("Heat Up")
+
+    def test_failed_hour_cycle_retains_state_and_blocks_pending_clicks(self):
+        self.add.click()
+        hour = self.page.locator(".hour-chip").nth(9)
+        hour.click()
+        self.page.evaluate("window.failNext = true")
+        hour.click()
+        expect(self.page.get_by_role("alert")).to_contain_text("Connection lost")
+        expect(hour).to_have_class("hour-chip heat")
+        self.page.evaluate("window.holdNext = true")
+        hour.click()
+        expect(hour).to_be_disabled()
+        expect(self.page.get_by_text("Saving…", exact=True)).to_be_visible()
+        self.page.evaluate("window.releaseSave()")
+        expect(hour).to_be_enabled()
+        expect(hour).to_have_class("hour-chip hot-water")
+
+    def test_legacy_plan_opt_in_and_unavailable_hot_water_options(self):
+        self.page.evaluate("""() => {
+          window.plans[1] = { name: 'Legacy', enabled: true, off_mode: 'Hot Water',
+            on_mode: 'Auto Heat', on_hours: [7], weekdays: [] };
+          window.publish();
+        }""")
+        switch = self.page.get_by_role("switch", name="Schedule hot water")
+        expect(switch).not_to_be_checked()
+        hour = self.page.locator(".hour-chip").nth(7)
+        expect(hour).to_have_attribute("aria-label", "07:00–08:00: heating on, hot water unmanaged")
+        hour.click()
+        expect(hour).to_have_class("hour-chip off")
+        self.assertNotIn("hot_water_on", self.page.evaluate("window.calls.at(-1).data"))
+        switch.click()
+        expect(self.page.get_by_label("Hot water Off mode", exact=True)).to_have_value("Off")
+        expect(self.page.get_by_label("Hot water On mode", exact=True)).to_have_value("On")
+        self.page.get_by_label("Hot water On mode", exact=True).select_option("Heat Up")
+        self.page.evaluate("""() => {
+          const states = {...card.hass.states};
+          delete states['select.hot_water'];
+          card.hass = {...card.hass, states};
+        }""")
+        expect(self.page.get_by_label("Hot water On mode", exact=True)).to_have_value("Heat Up")
+        expect(self.page.get_by_label("Hot water Off mode", exact=True)).to_have_value("Off")
+
+    def test_schedule_status_shows_both_functions(self):
+        expect(self.page.get_by_text("Heating scheduled: Auto Heat", exact=True)).to_be_visible()
+        expect(self.page.get_by_text("Heating current: Hot Water", exact=True)).to_be_visible()
+        expect(self.page.get_by_text("Hot water scheduled: On", exact=True)).to_be_visible()
+        expect(self.page.get_by_text("Hot water current: Auto", exact=True)).to_be_visible()
 
     def test_limit_and_keyed_plan_removal(self):
         for _ in range(5):

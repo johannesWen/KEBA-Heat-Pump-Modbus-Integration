@@ -49,6 +49,9 @@ SERVICE_SET_SCHEDULE_ON_MODE = "set_schedule_on_mode"
 SERVICE_SET_SCHEDULE_HOUR = "set_schedule_hour"
 SERVICE_SET_SCHEDULE_WEEKDAY = "set_schedule_weekday"
 SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
+SERVICE_SET_SCHEDULE_HOT_WATER_ENABLED = "set_schedule_hot_water_enabled"
+SERVICE_SET_SCHEDULE_HOT_WATER_OFF_MODE = "set_schedule_hot_water_off_mode"
+SERVICE_SET_SCHEDULE_HOT_WATER_ON_MODE = "set_schedule_hot_water_on_mode"
 
 PLATFORMS = [
     Platform.SENSOR,
