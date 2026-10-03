@@ -6,7 +6,6 @@ views:
     icon: mdi:heat-pump
     cards:
       - type: custom:keba-heat-pump-modbus-card
-        entity_prefix: keba_heat_pump_modbus
         title: KEBA Heat Pump
 
       - type: entities

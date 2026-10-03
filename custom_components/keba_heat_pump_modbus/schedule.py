@@ -29,6 +29,9 @@ from .const import (
     SERVICE_REMOVE_SCHEDULE,
     SERVICE_SET_SCHEDULE_ENABLED,
     SERVICE_SET_SCHEDULE_HOUR,
+    SERVICE_SET_SCHEDULE_HOT_WATER_ENABLED,
+    SERVICE_SET_SCHEDULE_HOT_WATER_OFF_MODE,
+    SERVICE_SET_SCHEDULE_HOT_WATER_ON_MODE,
     SERVICE_SET_SCHEDULE_WEEKDAY,
     SERVICE_SET_SCHEDULE_NAME,
     SERVICE_SET_SCHEDULE_OFF_MODE,
@@ -48,11 +51,13 @@ ATTR_HOUR = "hour"
 ATTR_WEEKDAY = "weekday"
 ATTR_SELECTED = "selected"
 ATTR_ON = "on"
+ATTR_HOT_WATER_ON = "hot_water_on"
 
 DEFAULT_OFF_MODE = "Hot Water"
 DEFAULT_ON_MODE = "Auto Heat"
 
 OPERATING_MODE_ENTITY_KEY = "operating_mode"
+HOT_WATER_MODE_ENTITY_KEY = "operating_mode_dhw_tank1"
 
 
 @dataclass
@@ -66,6 +71,11 @@ class SchedulePlan:
     on_mode: str = DEFAULT_ON_MODE
     on_hours: List[int] = field(default_factory=list)
     weekdays: List[int] = field(default_factory=list)
+    # Older stored plans leave hot water unmanaged until explicitly enabled.
+    hot_water_enabled: bool = False
+    hot_water_off_mode: str = "Off"
+    hot_water_on_mode: str = "On"
+    hot_water_on_hours: List[int] = field(default_factory=list)
 
     def asdict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -84,7 +94,7 @@ _managers_by_entity_id: Dict[str, "KebaScheduleManager"] = {}
 
 
 class KebaScheduleManager:
-    """Manages schedule plans and applies the system operating mode.
+    """Manages schedule plans and applies system and hot-water operating modes.
 
     Plans are persisted via Home Assistant storage. The manager evaluates the
     active schedules every minute and immediately after any plan change.
@@ -110,6 +120,8 @@ class KebaScheduleManager:
         self._entities: List[Any] = []
         self._scheduled_mode: str | None = None
         self._last_applied_mode: str | None = None
+        self._scheduled_hot_water_mode: str | None = None
+        self._last_applied_hot_water_mode: str | None = None
         self._evaluation_lock = asyncio.Lock()
 
     @property
@@ -123,6 +135,10 @@ class KebaScheduleManager:
     @property
     def scheduled_mode(self) -> str | None:
         return self._scheduled_mode
+
+    @property
+    def scheduled_hot_water_mode(self) -> str | None:
+        return self._scheduled_hot_water_mode
 
     @property
     def active(self) -> bool:
@@ -211,13 +227,12 @@ class KebaScheduleManager:
         """Wrap async evaluate for the event tracker."""
         self.hass.async_create_task(self._async_evaluate())
 
-    def _resolve_operating_mode_entity_id(self) -> str | None:
-        """Find the system operating_mode select entity for this config entry.
-
-        The select entity unique_id is deterministic: ``{entry_id}_operating_mode``.
-        """
+    def _resolve_operating_mode_entity_id(
+        self, entity_key: str = OPERATING_MODE_ENTITY_KEY
+    ) -> str | None:
+        """Find an operating-mode select belonging to this config entry."""
         ent_reg = er.async_get(self.hass)
-        target_unique_id = f"{self._entry_id}_{OPERATING_MODE_ENTITY_KEY}"
+        target_unique_id = f"{self._entry_id}_{entity_key}"
         return ent_reg.async_get_entity_id("select", DOMAIN, target_unique_id)
 
     async def _async_evaluate(self) -> None:
@@ -229,48 +244,52 @@ class KebaScheduleManager:
         """
         async with self._evaluation_lock:
             target_mode = self._compute_target_mode()
-            if self._scheduled_mode != target_mode:
+            hot_water_mode = self._compute_target_mode(hot_water=True)
+            if (
+                self._scheduled_mode != target_mode
+                or self._scheduled_hot_water_mode != hot_water_mode
+            ):
                 self._scheduled_mode = target_mode
+                self._scheduled_hot_water_mode = hot_water_mode
                 self._async_update_entities()
 
-            if target_mode is None:
-                self._last_applied_mode = None
-                return
+            self._last_applied_mode = await self._async_apply_mode(
+                OPERATING_MODE_ENTITY_KEY, target_mode, self._last_applied_mode
+            )
+            self._last_applied_hot_water_mode = await self._async_apply_mode(
+                HOT_WATER_MODE_ENTITY_KEY,
+                hot_water_mode,
+                self._last_applied_hot_water_mode,
+            )
 
-            if target_mode == self._last_applied_mode:
-                return
-
-            operating_mode_entity = self._resolve_operating_mode_entity_id()
-            if operating_mode_entity is None:
-                return
-
-            current_state = self.hass.states.get(operating_mode_entity)
-            if current_state is None or current_state.state in (
-                STATE_UNAVAILABLE,
-                STATE_UNKNOWN,
-            ):
-                return
-
-            if current_state.state != target_mode:
-                try:
-                    await self.hass.services.async_call(
-                        "select",
-                        "select_option",
-                        {
-                            ATTR_ENTITY_ID: operating_mode_entity,
-                            "option": target_mode,
-                        },
-                        blocking=True,
-                    )
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.error(
-                        "Failed to apply scheduled operating mode '%s': %s",
-                        target_mode,
-                        err,
-                    )
-                    return
-
-            self._last_applied_mode = target_mode
+    async def _async_apply_mode(
+        self, entity_key: str, target_mode: str | None, last_applied: str | None
+    ) -> str | None:
+        """Apply one target independently, retaining failures for the next retry."""
+        if target_mode is None:
+            return None
+        if target_mode == last_applied:
+            return last_applied
+        entity_id = self._resolve_operating_mode_entity_id(entity_key)
+        current_state = self.hass.states.get(entity_id) if entity_id else None
+        if current_state is None or current_state.state in (
+            STATE_UNAVAILABLE, STATE_UNKNOWN
+        ):
+            return last_applied
+        if current_state.state != target_mode:
+            try:
+                await self.hass.services.async_call(
+                    "select", "select_option",
+                    {ATTR_ENTITY_ID: entity_id, "option": target_mode},
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Failed to apply scheduled mode '%s' to %s: %s",
+                    target_mode, entity_id, err,
+                )
+                return last_applied
+        return target_mode
 
     def _eligible_plans(self, weekday: int) -> List[SchedulePlan]:
         """Return enabled plans for the local weekday, in priority order."""
@@ -283,7 +302,7 @@ class KebaScheduleManager:
             key=lambda plan: plan.plan_id,
         )
 
-    def _compute_target_mode(self) -> str | None:
+    def _compute_target_mode(self, *, hot_water: bool = False) -> str | None:
         """Return today's highest-priority On mode, or its fallback Off mode.
 
         A plan with no selected weekdays applies every day. Ineligible plans
@@ -292,14 +311,20 @@ class KebaScheduleManager:
         """
         local_now = dt_now()
         eligible_plans = self._eligible_plans(local_now.weekday())
+        if hot_water:
+            eligible_plans = [p for p in eligible_plans if p.hot_water_enabled]
         if not eligible_plans:
             return None
 
         for plan in eligible_plans:
-            if local_now.hour in plan.on_hours:
-                return plan.on_mode
+            hours = plan.hot_water_on_hours if hot_water else plan.on_hours
+            if local_now.hour in hours:
+                return plan.hot_water_on_mode if hot_water else plan.on_mode
 
-        return eligible_plans[0].off_mode
+        return (
+            eligible_plans[0].hot_water_off_mode
+            if hot_water else eligible_plans[0].off_mode
+        )
 
     def _get_plan(self, plan_id: int) -> SchedulePlan:
         if plan_id not in self._plans:
@@ -328,6 +353,10 @@ class KebaScheduleManager:
                 "on_mode": plan.on_mode,
                 "on_hours": sorted(plan.on_hours),
                 "weekdays": sorted(plan.weekdays),
+                "hot_water_enabled": plan.hot_water_enabled,
+                "hot_water_off_mode": plan.hot_water_off_mode,
+                "hot_water_on_mode": plan.hot_water_on_mode,
+                "hot_water_on_hours": sorted(plan.hot_water_on_hours),
             }
             for plan in self._plans.values()
         }
@@ -343,7 +372,7 @@ class KebaScheduleManager:
         used = set(self._plans.keys())
         plan_id = next(i for i in range(1, SCHEDULE_MAX_PLANS + 1) if i not in used)
 
-        plan = SchedulePlan(plan_id=plan_id)
+        plan = SchedulePlan(plan_id=plan_id, hot_water_enabled=True)
         self._plans[plan_id] = plan
         await self._async_save()
         self._async_update_entities()
@@ -378,6 +407,21 @@ class KebaScheduleManager:
         plan.on_mode = call.data[ATTR_ON_MODE]
         await self._async_update_plan(plan)
 
+    async def _service_set_schedule_hot_water_enabled(self, call: ServiceCall) -> None:
+        plan = self._get_plan(call.data[ATTR_PLAN_ID])
+        plan.hot_water_enabled = call.data[ATTR_ENABLED]
+        await self._async_update_plan(plan)
+
+    async def _service_set_schedule_hot_water_off_mode(self, call: ServiceCall) -> None:
+        plan = self._get_plan(call.data[ATTR_PLAN_ID])
+        plan.hot_water_off_mode = call.data[ATTR_OFF_MODE]
+        await self._async_update_plan(plan)
+
+    async def _service_set_schedule_hot_water_on_mode(self, call: ServiceCall) -> None:
+        plan = self._get_plan(call.data[ATTR_PLAN_ID])
+        plan.hot_water_on_mode = call.data[ATTR_ON_MODE]
+        await self._async_update_plan(plan)
+
     async def _service_set_schedule_weekday(self, call: ServiceCall) -> None:
         plan = self._get_plan(call.data[ATTR_PLAN_ID])
         weekday = call.data[ATTR_WEEKDAY]
@@ -392,13 +436,16 @@ class KebaScheduleManager:
     async def _service_set_schedule_hour(self, call: ServiceCall) -> None:
         plan = self._get_plan(call.data[ATTR_PLAN_ID])
         hour = call.data[ATTR_HOUR]
-        on = call.data[ATTR_ON]
-        if on:
-            if hour not in plan.on_hours:
-                plan.on_hours.append(hour)
-                plan.on_hours.sort()
-        else:
-            plan.on_hours = [h for h in plan.on_hours if h != hour]
+        selections = [(ATTR_ON, plan.on_hours)]
+        if ATTR_HOT_WATER_ON in call.data:
+            selections.append((ATTR_HOT_WATER_ON, plan.hot_water_on_hours))
+        for key, hours in selections:
+            if call.data[key]:
+                if hour not in hours:
+                    hours.append(hour)
+                    hours.sort()
+            elif hour in hours:
+                hours.remove(hour)
         await self._async_update_plan(plan)
 
 
@@ -472,9 +519,21 @@ SERVICE_SCHEMAS = {
                 vol.Coerce(int), vol.Range(min=0, max=23)
             ),
             vol.Required(ATTR_ON): cv.boolean,
+            vol.Optional(ATTR_HOT_WATER_ON): cv.boolean,
         }
     ),
 }
+
+# These services have the same payloads as their heating counterparts.
+SERVICE_SCHEMAS[SERVICE_SET_SCHEDULE_HOT_WATER_ENABLED] = SERVICE_SCHEMAS[
+    SERVICE_SET_SCHEDULE_ENABLED
+]
+SERVICE_SCHEMAS[SERVICE_SET_SCHEDULE_HOT_WATER_OFF_MODE] = SERVICE_SCHEMAS[
+    SERVICE_SET_SCHEDULE_OFF_MODE
+]
+SERVICE_SCHEMAS[SERVICE_SET_SCHEDULE_HOT_WATER_ON_MODE] = SERVICE_SCHEMAS[
+    SERVICE_SET_SCHEDULE_ON_MODE
+]
 
 
 async def _handle_service(call: ServiceCall) -> None:
@@ -558,6 +617,13 @@ class KebaScheduledModeSensor(SensorEntity):
     @property
     def native_value(self) -> str | None:
         return self._manager.scheduled_mode
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        return {
+            **self._attr_extra_state_attributes,
+            "hot_water_mode": self._manager.scheduled_hot_water_mode,
+        }
 
     @property
     def device_info(self) -> Dict[str, Any]:

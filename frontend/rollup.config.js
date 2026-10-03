@@ -10,14 +10,16 @@ const manifestPath = pathResolve(
   '../custom_components/keba_heat_pump_modbus/manifest.json',
 );
 let manifestVersion = '0.0.0';
+let integrationDomain = 'keba_heat_pump_modbus';
 try {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   manifestVersion = manifest.version || manifestVersion;
+  integrationDomain = manifest.domain || integrationDomain;
 } catch (err) {
   console.warn('Could not read manifest version:', err.message);
 }
 
-/** Rollup plugin that exposes the integration version as a virtual module. */
+/** Expose integration metadata to the bundled card. */
 const integrationVersionPlugin = () => ({
   name: 'integration-version',
   resolveId(source) {
@@ -28,7 +30,7 @@ const integrationVersionPlugin = () => ({
   },
   load(id) {
     if (id === 'virtual:integration-version') {
-      return `export const CARD_VERSION = ${JSON.stringify(manifestVersion)};`;
+      return `export const CARD_VERSION = ${JSON.stringify(manifestVersion)};\nexport const INTEGRATION_DOMAIN = ${JSON.stringify(integrationDomain)};`;
     }
     return null;
   },

@@ -312,6 +312,9 @@ def test_service_registration():
             "set_schedule_on_mode",
             "set_schedule_hour",
             "set_schedule_weekday",
+            "set_schedule_hot_water_enabled",
+            "set_schedule_hot_water_off_mode",
+            "set_schedule_hot_water_on_mode",
         ]
         for service in services:
             assert hass.services_has(DOMAIN, service)
@@ -389,15 +392,21 @@ def test_registered_services_update_the_schedules_sensor():
         try:
             await call("add_schedule")
             assert sensor.native_value == "1"
+            assert sensor.extra_state_attributes["plans"]["1"]["hot_water_enabled"] is True
             await call("set_schedule_name", plan_id=1, name="Morning")
             await call("set_schedule_off_mode", plan_id=1, off_mode="Standby")
             await call("set_schedule_on_mode", plan_id=1, on_mode="Full Auto")
-            await call("set_schedule_hour", plan_id=1, hour=7, on=True)
+            await call("set_schedule_hot_water_off_mode", plan_id=1, off_mode="Auto")
+            await call("set_schedule_hot_water_on_mode", plan_id=1, on_mode="Heat Up")
+            await call("set_schedule_hour", plan_id=1, hour=7, on=True, hot_water_on=True)
+            await call("set_schedule_hot_water_enabled", plan_id=1, enabled=False)
             await call("set_schedule_weekday", plan_id=1, weekday=0, selected=True)
             await call("set_schedule_enabled", plan_id=1, enabled=False)
             assert sensor.extra_state_attributes["plans"]["1"] == {
                 "name": "Morning", "enabled": False, "off_mode": "Standby",
                 "on_mode": "Full Auto", "on_hours": [7], "weekdays": [0],
+                "hot_water_enabled": False, "hot_water_off_mode": "Auto",
+                "hot_water_on_mode": "Heat Up", "hot_water_on_hours": [7],
             }
             await call("remove_schedule", plan_id=1)
             assert sensor.native_value == "0"
@@ -475,7 +484,9 @@ def test_schedule_sends_one_command_per_mode_transition(monkeypatch):
         monkeypatch.setattr(
             "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
             lambda _hass: types.SimpleNamespace(
-                async_get_entity_id=lambda *_args: entity_id
+                async_get_entity_id=lambda *args: (
+                    entity_id if args[-1] == "entry1_operating_mode" else None
+                )
             ),
         )
         hass.states[entity_id] = types.SimpleNamespace(state="Hot Water")
@@ -525,7 +536,9 @@ def test_schedule_retries_unavailable_or_failed_change(monkeypatch):
         monkeypatch.setattr(
             "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
             lambda _hass: types.SimpleNamespace(
-                async_get_entity_id=lambda *_args: entity_id
+                async_get_entity_id=lambda *args: (
+                    entity_id if args[-1] == "entry1_operating_mode" else None
+                )
             ),
         )
         monkeypatch.setattr(
@@ -567,7 +580,9 @@ def test_overlapping_evaluations_do_not_duplicate_commands(monkeypatch):
         monkeypatch.setattr(
             "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
             lambda _hass: types.SimpleNamespace(
-                async_get_entity_id=lambda *_args: entity_id
+                async_get_entity_id=lambda *args: (
+                    entity_id if args[-1] == "entry1_operating_mode" else None
+                )
             ),
         )
         monkeypatch.setattr(
@@ -693,7 +708,9 @@ def test_monday_plan_stops_at_midnight_without_off_command(monkeypatch):
         monkeypatch.setattr(
             "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
             lambda _hass: types.SimpleNamespace(
-                async_get_entity_id=lambda *_args: entity_id
+                async_get_entity_id=lambda *args: (
+                    entity_id if args[-1] == "entry1_operating_mode" else None
+                )
             ),
         )
         local = {"now": datetime(2026, 9, 28, 23)}  # Monday
@@ -719,6 +736,228 @@ def test_monday_plan_stops_at_midnight_without_off_command(monkeypatch):
         await manager._async_evaluate()
         assert manager.scheduled_mode == "Auto Heat"
         assert len(hass._call_log) == 2
+        await manager.async_shutdown()
+
+    asyncio.run(_run())
+
+
+def test_hour_cycle_is_atomic_and_legacy_calls_retain_hot_water(monkeypatch):
+    import types
+
+    async def _run():
+        hass = _make_hass()
+        manager = _make_manager(hass)
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.dt_now",
+            lambda: types.SimpleNamespace(hour=7, weekday=lambda: 0),
+        )
+        await manager._service_add_schedule(ServiceCall(data={}))
+        evaluations = []
+        original_evaluate = manager._async_evaluate
+
+        async def record_evaluate():
+            evaluations.append((
+                manager._compute_target_mode(),
+                manager._compute_target_mode(hot_water=True),
+            ))
+            await original_evaluate()
+
+        manager._async_evaluate = record_evaluate
+        for count, (heating, hot_water, targets) in enumerate([
+            (True, False, ("Auto Heat", "Off")),
+            (False, True, ("Hot Water", "On")),
+            (True, True, ("Auto Heat", "On")),
+            (False, False, ("Hot Water", "Off")),
+        ], start=1):
+            await manager._service_set_schedule_hour(ServiceCall(data={
+                "plan_id": 1, "hour": 7, "on": heating, "hot_water_on": hot_water,
+            }))
+            assert evaluations[-1] == targets
+            assert len(evaluations) == count
+            stored = manager._store._data["plans"][0]
+            assert stored["on_hours"] == ([7] if heating else [])
+            assert stored["hot_water_on_hours"] == ([7] if hot_water else [])
+
+        await manager._service_set_schedule_hour(ServiceCall(data={
+            "plan_id": 1, "hour": 7, "on": False, "hot_water_on": True,
+        }))
+        await manager._service_set_schedule_hour(ServiceCall(data={
+            "plan_id": 1, "hour": 7, "on": True,
+        }))
+        assert manager.plans[1].hot_water_on_hours == [7]
+        reloaded = _make_manager(hass)
+        reloaded._store._data = manager._store._data
+        await reloaded._async_load()
+        assert reloaded.plans[1].asdict() == manager.plans[1].asdict()
+        await manager.async_shutdown()
+
+    asyncio.run(_run())
+
+
+def test_legacy_hot_water_opt_in_and_retained_hours():
+    async def _run():
+        hass = _make_hass()
+        manager = _make_manager(hass)
+        manager._store._data = {"plans": [{"plan_id": 1, "on_hours": [7]}]}
+        await manager.async_setup()
+        assert manager.plans[1].hot_water_enabled is False
+        assert manager._compute_target_mode(hot_water=True) is None
+        await manager._service_set_schedule_hot_water_enabled(
+            ServiceCall(data={"plan_id": 1, "enabled": True})
+        )
+        assert manager._compute_target_mode(hot_water=True) == "Off"
+        await manager._service_set_schedule_hour(ServiceCall(data={
+            "plan_id": 1, "hour": 7, "on": True, "hot_water_on": True,
+        }))
+        await manager._service_set_schedule_hot_water_enabled(
+            ServiceCall(data={"plan_id": 1, "enabled": False})
+        )
+        assert manager._compute_target_mode(hot_water=True) is None
+        assert manager.plans[1].hot_water_on_hours == [7]
+        assert hass._call_log == []
+        await manager.async_shutdown()
+
+    asyncio.run(_run())
+
+
+def test_hot_water_priority_and_weekdays_are_independent(monkeypatch):
+    from datetime import datetime
+
+    hass = _make_hass()
+    manager = _make_manager(hass)
+    local = {"now": datetime(2026, 9, 28, 7)}
+    monkeypatch.setattr(
+        "custom_components.keba_heat_pump_modbus.schedule.dt_now", lambda: local["now"]
+    )
+    manager._plans = {
+        1: SchedulePlan(plan_id=1, weekdays=[0], on_hours=[7]),
+        2: SchedulePlan(
+            plan_id=2, weekdays=[0], hot_water_enabled=True,
+            hot_water_on_hours=[7, 23], hot_water_on_mode="Heat Up", hot_water_off_mode="Auto",
+        ),
+        3: SchedulePlan(
+            plan_id=3, weekdays=[0], hot_water_enabled=True,
+            hot_water_on_hours=[7], hot_water_on_mode="On",
+        ),
+    }
+    assert manager._compute_target_mode() == "Auto Heat"
+    assert manager._compute_target_mode(hot_water=True) == "Heat Up"
+    local["now"] = datetime(2026, 9, 28, 8)
+    assert manager._compute_target_mode() == "Hot Water"
+    assert manager._compute_target_mode(hot_water=True) == "Auto"
+    manager._plans[2].enabled = False
+    assert manager._compute_target_mode(hot_water=True) == "Off"
+    local["now"] = datetime(2026, 9, 28, 23)
+    manager._plans[2].enabled = True
+    assert manager._compute_target_mode(hot_water=True) == "Heat Up"
+    local["now"] = datetime(2026, 9, 29, 0)
+    assert manager._compute_target_mode() is None
+    assert manager._compute_target_mode(hot_water=True) is None
+
+
+@pytest.mark.parametrize("failed_key", ["operating_mode", "operating_mode_dhw_tank1"])
+def test_each_mode_retries_without_repeating_the_successful_write(monkeypatch, failed_key):
+    import types
+    from custom_components.keba_heat_pump_modbus.schedule import KebaScheduledModeSensor
+
+    async def _run():
+        hass = _make_hass()
+        manager = _make_manager(hass)
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.dt_now",
+            lambda: types.SimpleNamespace(hour=7, weekday=lambda: 0),
+        )
+        ids = {
+            "entry1_operating_mode": "select.renamed_heat",
+            "entry1_operating_mode_dhw_tank1": "select.renamed_water",
+        }
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
+            lambda _hass: types.SimpleNamespace(
+                async_get_entity_id=lambda platform, domain, unique_id: ids.get(unique_id)
+            ),
+        )
+        manager._plans[1] = SchedulePlan(
+            plan_id=1, on_hours=[7], hot_water_enabled=True, hot_water_on_hours=[7]
+        )
+        hass.states = {
+            "select.renamed_heat": types.SimpleNamespace(state="Hot Water"),
+            "select.renamed_water": types.SimpleNamespace(state="Off"),
+        }
+        attempts = []
+        failed_id = ids[f"entry1_{failed_key}"]
+
+        async def flaky_call(domain, service, data, blocking=False):
+            assert (domain, service, blocking) == ("select", "select_option", True)
+            attempts.append(data.copy())
+            if data["entity_id"] == failed_id and sum(
+                call["entity_id"] == failed_id for call in attempts
+            ) == 1:
+                raise RuntimeError("Write failed")
+
+        hass.services.async_call = flaky_call
+        await asyncio.gather(manager._async_evaluate(), manager._async_evaluate())
+        assert len(attempts) == 3
+        assert sum(call["entity_id"] == failed_id for call in attempts) == 2
+        sensor = KebaScheduledModeSensor(manager)
+        assert sensor.native_value == "Auto Heat"
+        assert sensor.extra_state_attributes == {
+            "keba_key": "scheduled_mode", "hot_water_mode": "On"
+        }
+        # Reported modes remain stale: successful commands must not be repeated.
+        await manager._async_evaluate()
+        assert len(attempts) == 3
+        # A manual hot-water override remains until the next target transition.
+        hass.states["select.renamed_water"].state = "Auto"
+        await manager._async_evaluate()
+        assert len(attempts) == 3
+        await manager._service_set_schedule_hot_water_enabled(
+            ServiceCall(data={"plan_id": 1, "enabled": False})
+        )
+        assert manager.scheduled_hot_water_mode is None
+        assert len(attempts) == 3
+        await manager._service_set_schedule_hot_water_enabled(
+            ServiceCall(data={"plan_id": 1, "enabled": True})
+        )
+        assert len(attempts) == 4
+        assert attempts[-1] == {"entity_id": "select.renamed_water", "option": "On"}
+        await manager.async_shutdown()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize("water_state", [None, "unknown", "unavailable"])
+def test_missing_hot_water_does_not_block_heating_and_recovers(monkeypatch, water_state):
+    import types
+
+    async def _run():
+        hass = _make_hass()
+        manager = _make_manager(hass)
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.dt_now",
+            lambda: types.SimpleNamespace(hour=7, weekday=lambda: 0),
+        )
+        water_present = {"value": water_state is not None}
+        monkeypatch.setattr(
+            "custom_components.keba_heat_pump_modbus.schedule.er.async_get",
+            lambda _hass: types.SimpleNamespace(async_get_entity_id=lambda _p, _d, uid: (
+                "select.heat" if uid == "entry1_operating_mode" else
+                "select.water" if water_present["value"] else None
+            )),
+        )
+        manager._plans[1] = SchedulePlan(
+            plan_id=1, on_hours=[7], hot_water_enabled=True, hot_water_on_hours=[7]
+        )
+        hass.states["select.heat"] = types.SimpleNamespace(state="Hot Water")
+        if water_state is not None:
+            hass.states["select.water"] = types.SimpleNamespace(state=water_state)
+        await manager._async_evaluate()
+        assert [c[2] for c in hass._call_log] == [{"entity_id": "select.heat", "option": "Auto Heat"}]
+        water_present["value"] = True
+        hass.states["select.water"] = types.SimpleNamespace(state="Off")
+        await manager._async_evaluate()
+        assert len(hass._call_log) == 2
+        assert hass._call_log[-1][2] == {"entity_id": "select.water", "option": "On"}
         await manager.async_shutdown()
 
     asyncio.run(_run())
