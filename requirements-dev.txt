@@ -1,4 +1,4 @@
-homeassistant==2026.9.4
+# Home Assistant runs in the Compose service; unit tests use HA stubs.
 pymodbus==3.15.0
 pytest>=8.2.0
 pytest-cov>=4.1.0

@@ -33,7 +33,7 @@ DEFAULT_HOLDING_REGISTERS: dict[int, int] = {
     6: 0,  # room offset temperature -> 0.0 C
     7: 2,  # operating mode circuit 1 -> Day
     8: 1,  # heat request -> On
-    10: 450,  # room humidity -> 45.0 %
+    10: 45,  # room humidity -> 45 %
     11: 0,  # cool request set external -> Off
     12: 0,  # heat request set external -> Off
     15: 350,  # circuit flow temperature -> 35.0 C
@@ -41,57 +41,57 @@ DEFAULT_HOLDING_REGISTERS: dict[int, int] = {
     17: 35,  # mixer position -> 35 %
     18: 1,  # circuit pump -> On
     # Circuit 2
-    101: 205,
-    102: 205,
-    104: 205,
-    105: 170,
+    51: 205,
+    52: 205,
+    54: 205,
+    55: 170,
+    56: 0,
+    57: 2,
+    58: 1,
+    60: 48,
+    61: 0,
+    62: 0,
+    65: 340,
+    66: 310,
+    67: 40,
+    68: 1,
+    # Circuit 3
+    101: 200,
+    102: 200,
+    104: 200,
+    105: 160,
     106: 0,
     107: 2,
     108: 1,
-    110: 480,
+    110: 50,
     111: 0,
     112: 0,
-    115: 340,
-    116: 310,
-    117: 40,
+    115: 330,
+    116: 300,
+    117: 45,
     118: 1,
-    # Circuit 3
-    201: 200,
-    202: 200,
-    204: 200,
-    205: 160,
-    206: 0,
-    207: 2,
-    208: 1,
-    210: 500,
-    211: 0,
-    212: 0,
-    215: 330,
-    216: 300,
-    217: 45,
-    218: 1,
     # Circuit 4
-    301: 195,
-    302: 195,
-    304: 195,
-    305: 150,
-    306: 0,
-    307: 2,
-    308: 1,
-    310: 520,
-    311: 0,
-    312: 0,
-    315: 320,
-    316: 290,
-    317: 50,
-    318: 1,
+    151: 195,
+    152: 195,
+    154: 195,
+    155: 150,
+    156: 0,
+    157: 2,
+    158: 1,
+    160: 52,
+    161: 0,
+    162: 0,
+    165: 320,
+    166: 290,
+    167: 50,
+    168: 1,
     # DHW tank
     401: 480,  # top temperature -> 48.0 C
     402: 500,  # top set temperature -> 50.0 C
     403: 1,  # operating mode -> Auto
     404: 650,  # excess energy target temp -> 65.0 C
     405: 1,  # heat request -> On
-    407: 450,  # reduced set temp -> 45.0 C
+    407: 45,  # reduced set temp -> 45.0 C
     # Heat pump
     700: 12345,  # operating hours
     701: 8765,  # total heating energy

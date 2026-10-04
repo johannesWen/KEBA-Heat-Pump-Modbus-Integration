@@ -53,11 +53,12 @@ function temperatureDevices(hass, registry) {
     if (!devices.has(entity.device_id)) {
       const device = registry.devices.find(item => item.id === entity.device_id);
       devices.set(entity.device_id, {
-        id: entity.device_id, label: device?.name_by_user || device?.name || 'KEBA device', entities: [],
+        id: entity.device_id, label: device?.name_by_user || device?.name || 'KEBA device', entities: [], keys: {},
         heatPump: device?.identifiers?.some(([domain, id]) => domain === INTEGRATION_DOMAIN && id.endsWith('_heat_pump')),
       });
     }
     devices.get(entity.device_id).entities.push(entity.entity_id);
+    devices.get(entity.device_id).keys[entity.entity_id] = state.attributes.keba_key || entity.unique_id || '';
   }
   const result = [...devices.values()].sort((a, b) => Number(!!b.heatPump) - Number(!!a.heatPump) ||
     a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
@@ -73,6 +74,32 @@ function temperatureDevices(hass, registry) {
       .localeCompare(hass.states[b].attributes.keba_key || b));
   }
   return result;
+}
+
+function temperaturePlots(device) {
+  const matching = pattern => device.entities.filter(id => pattern.test(device.keys[id]));
+  const flow = matching(/(?:^|_)(?:flow_temperature|reflux_temperature|set_temperature)$/);
+  const source = matching(/(?:^|_)source_(?:in|out)_temperature$/);
+  if (device.heatPump || flow.length || source.length) {
+    return [
+      { title: 'Flow, reflux and setpoint', entities: flow },
+      { title: 'Source in and out', entities: source },
+      { title: 'Other temperatures', entities: device.entities.filter(id => !flow.includes(id) && !source.includes(id)) },
+    ].filter(plot => plot.entities.length);
+  }
+  if (matching(/_buffer_tank\d+$/).length) {
+    const primary = matching(/(?:^|_)temperature_(?:middle|top)_buffer_tank\d+$/);
+    return [{ title: 'Middle and top', entities: device.entities,
+      optional: device.entities.filter(id => !primary.includes(id)) }];
+  }
+  if (matching(/_circuit_\d+$/).length) {
+    const circuitFlow = matching(/(?:^|_)circuit_(?:flow|reflux)_temperature_circuit_\d+$/);
+    return [
+      { title: 'Flow and reflux', entities: circuitFlow },
+      { title: 'Other temperatures', entities: device.entities.filter(id => !circuitFlow.includes(id)) },
+    ].filter(plot => plot.entities.length);
+  }
+  return [{ title: 'Temperatures', entities: device.entities }];
 }
 
 async function loadRegistry(hass) {
@@ -91,7 +118,7 @@ class KebaHeatPumpStatusCard extends LitElement {
     hass: { attribute: false }, config: { attribute: false },
     _devices: { state: true }, _deviceId: { state: true }, _window: { state: true },
     _history: { state: true }, _range: { state: true }, _loading: { state: true },
-    _error: { state: true }, _notice: { state: true },
+    _error: { state: true }, _notice: { state: true }, _enabledBufferEntities: { state: true },
   };
 
   constructor() {
@@ -101,6 +128,7 @@ class KebaHeatPumpStatusCard extends LitElement {
     this._request = 0;
     this._discoveryRequest = 0;
     this._unsubscribers = [];
+    this._enabledBufferEntities = new Set();
     this._onReady = () => this._loadDevices();
   }
 
@@ -115,7 +143,10 @@ class KebaHeatPumpStatusCard extends LitElement {
 
   static getStubConfig() { return { type: `custom:${CARD_TAG}`, time_window: 'today' }; }
   static getConfigElement() { return document.createElement(EDITOR_TAG); }
-  getCardSize() { return 7; }
+  getCardSize() {
+    const device = this._devices.find(item => item.id === this._deviceId);
+    return 7 + Math.max(0, (device ? temperaturePlots(device).length : 1) - 1) * 4;
+  }
 
   connectedCallback() {
     super.connectedCallback();
@@ -161,6 +192,7 @@ class KebaHeatPumpStatusCard extends LitElement {
 
   updated(changed) {
     if (!this.hass || !this.config || !this.isConnected) return;
+    if (this._history?.line.length) this._configureChartLegends();
     if (changed.has('hass') && this.hass.connection !== this._connection) {
       this._connect();
       return;
@@ -178,7 +210,7 @@ class KebaHeatPumpStatusCard extends LitElement {
   _updateDevices() {
     const devices = temperatureDevices(this.hass, this._registry);
     const signature = JSON.stringify(devices.map(device => [device.id, device.label,
-      device.entities.map(id => [id, this.hass.states[id].attributes.unit_of_measurement])]));
+      device.entities.map(id => [id, device.keys[id], this.hass.states[id].attributes.unit_of_measurement])]));
     const changed = signature !== this._deviceSignature;
     this._deviceSignature = signature;
     if (changed) this._devices = devices;
@@ -224,6 +256,99 @@ class KebaHeatPumpStatusCard extends LitElement {
       await waitFor('state-history-charts');
     })().catch(error => { this._chartReady = null; throw error; });
     await this._chartReady;
+  }
+
+  async _configureChartLegends() {
+    this._legendCharts ||= new WeakSet();
+    for (const charts of this.renderRoot.querySelectorAll('state-history-charts')) {
+      await charts.updateComplete;
+      for (const line of charts.shadowRoot?.querySelectorAll('state-history-chart-line') || []) {
+        await line.updateComplete;
+        if (!this.renderRoot.contains(charts) || this._legendCharts.has(line)) continue;
+        const chart = line.shadowRoot?.querySelector('ha-chart-base');
+        if (!chart) continue;
+        await chart.updateComplete;
+        if (!this.renderRoot.contains(charts)) continue;
+        this._legendCharts.add(line);
+        const timestamp = document.createElement('div');
+        timestamp.className = 'selected-time';
+        const style = document.createElement('style');
+        style.textContent = `
+          .chart-legend { container-type: inline-size; margin-top: 12px; padding: 12px; border: 1px solid var(--divider-color); border-radius: 8px; max-height: 240px; overflow: auto; }
+          .selected-time { margin-bottom: 8px; font-size: 12px; color: var(--secondary-text-color); }
+          .chart-legend ul { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0px 16px; }
+          .chart-legend li { display: flex; align-items: center; min-width: 0; max-width: none !important; height: auto; min-height: 24px; }
+          .chart-legend .label { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+          .chart-legend .value { max-width: 50%; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; text-align: end; }
+          @container (min-width: 340px) { .chart-legend ul { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        `;
+        chart.shadowRoot.append(style);
+        chart.addController({ hostUpdated: () => {
+          const legend = chart.shadowRoot.querySelector('.chart-legend');
+          if (legend && timestamp.parentElement !== legend) {
+            legend.setAttribute('role', 'group');
+            legend.setAttribute('aria-label', 'Legend and selected values');
+            legend.prepend(timestamp);
+          }
+        } });
+        let selectedTime = null;
+        const updateLegend = (params = []) => {
+          const time = selectedTime ?? Math.max(this._range.end.getTime(),
+            ...(chart.data || []).map(dataset => dataset.data?.at(-1)?.[0] || 0));
+          timestamp.textContent = new Intl.DateTimeFormat(this.hass.locale?.language || this.hass.language || 'en', {
+            timeZone: this.hass.config.time_zone, dateStyle: 'medium', timeStyle: 'medium',
+          }).format(new Date(time));
+          for (const item of chart.options.legend?.data || []) {
+            const dataset = chart.data?.find(dataset => dataset.id === item.id);
+            const point = params.find(point => point.seriesId === item.id);
+            const value = point?.value?.[1] ?? dataset?.data?.findLast(point =>
+              point[0] <= time && typeof point[1] === 'number')?.[1];
+            const state = this.hass.states[item.id];
+            item.value = typeof value !== 'number' ? '—' :
+              state && this.hass.formatEntityState ? this.hass.formatEntityState(state, String(value)) :
+              `${new Intl.NumberFormat(this.hass.locale?.language || 'en').format(value)} ${line.unit || ''}`.trim();
+          }
+          chart.requestUpdate();
+        };
+        let configuredOptions;
+        let tooltipChart;
+        // Keep the selected time when native updates rebuild the chart options.
+        const controller = { hostUpdated: () => {
+          if (!chart?.options?.tooltip || chart.options === configuredOptions) return;
+          const tooltip = chart.options.tooltip;
+          chart.options = configuredOptions = { ...chart.options, tooltip: {
+            ...tooltip, extraCssText: 'display:none!important;',
+            formatter: params => {
+              if (chart.chart && chart.chart !== tooltipChart) {
+                tooltipChart = chart.chart;
+                tooltipChart.on('hideTip', event => {
+                  // A touch drag ending keeps the native slider active.
+                  if (!event.from) return;
+                  selectedTime = null;
+                  updateLegend();
+                });
+              }
+              selectedTime = params[0].axisValue;
+              updateLegend(params);
+              return nothing;
+            },
+          } };
+          updateLegend();
+        } };
+        line.addController(controller);
+        controller.hostUpdated();
+      }
+    }
+  }
+
+  _entityName(id) {
+    const name = this.hass.states[id].attributes.friendly_name || id;
+    const entity = this._registry.entities.find(entity => entity.entity_id === id);
+    const device = this._registry.devices.find(device => device.id === entity?.device_id);
+    for (const prefix of [device?.name_by_user, device?.name]) {
+      if (prefix && name.startsWith(`${prefix} `)) return name.slice(prefix.length + 1);
+    }
+    return name;
   }
 
   async _fetchHistory() {
@@ -287,7 +412,7 @@ class KebaHeatPumpStatusCard extends LitElement {
             .map(point => ({ state: String(point.mean), last_changed: point.end }));
           usedStatistics ||= older.length > 0;
           return { entity_id: id, domain: id.split('.')[0],
-            name: this.hass.states[id].attributes.friendly_name || id, states, statistics: older };
+            name: this._entityName(id), states, statistics: older };
         }).filter(entity => [...entity.states, ...entity.statistics].some(point => numeric(point.state))),
       })).filter(group => group.data.length);
       this._history = { line, timeline: [] };
@@ -302,6 +427,36 @@ class KebaHeatPumpStatusCard extends LitElement {
 
   _selectDevice(event) { this._deviceId = event.target.value; this._fetchHistory(); }
   _selectWindow(key) { this._window = key; this._fetchHistory(); }
+
+  _toggleBufferEntity(id, enabled) {
+    const entities = new Set(this._enabledBufferEntities);
+    if (enabled) entities.add(id);
+    else entities.delete(id);
+    this._enabledBufferEntities = entities;
+  }
+
+  _renderPlot(plot) {
+    const line = this._history.line.map(group => ({ ...group,
+      identifier: group.data.filter(entity => plot.entities.includes(entity.entity_id))
+        .map(entity => entity.entity_id).join(','),
+      data: group.data.filter(entity => plot.entities.includes(entity.entity_id) &&
+        (!plot.optional?.includes(entity.entity_id) || this._enabledBufferEntities.has(entity.entity_id))),
+    })).filter(group => group.data.length);
+    return html`<section class="plot" aria-label=${plot.title}>
+      <h3>${plot.title}</h3>
+      ${plot.optional?.length ? html`<fieldset class="extra-temperatures">
+        <legend>Additional temperatures</legend>
+        ${plot.optional.map(id => html`<label><input type="checkbox"
+          .checked=${this._enabledBufferEntities.has(id)}
+          @change=${event => this._toggleBufferEntity(id, event.target.checked)}
+        >${this.hass.states[id].attributes.friendly_name || id}</label>`)}
+      </fieldset>` : nothing}
+      ${line.length ? html`<state-history-charts .hass=${this.hass} .historyData=${{ line, timeline: [] }}
+        .startTime=${this._range.start} .endTime=${this._range.end}
+        .showNames=${true} .expandLegend=${true} .fitYData=${true}
+      ></state-history-charts>` : html`<p class="message" role="status">No temperature history found for this plot.</p>`}
+    </section>`;
+  }
 
   render() {
     if (!this.hass || !this.config) return nothing;
@@ -330,11 +485,8 @@ class KebaHeatPumpStatusCard extends LitElement {
           ${this._error ? html`<p class="message error" role="alert">${this._error} Use Refresh to retry.</p>` :
             this._loading ? html`<p class="message" role="status">Loading temperature history…</p>` :
             !device ? html`<p class="message" role="status">${this._deviceId ? 'Selected device unavailable.' : 'No KEBA temperature devices available.'}</p>` :
-            !this._history?.line.length ? html`<p class="message" role="status">No temperature history found for this period.</p>` : html`
-              <state-history-charts .hass=${this.hass} .historyData=${this._history}
-                .startTime=${this._range.start} .endTime=${this._range.end}
-                .showNames=${true} .expandLegend=${true} .fitYData=${true}
-              ></state-history-charts>`}
+            !this._history?.line.length ? html`<p class="message" role="status">No temperature history found for this period.</p>` :
+            temperaturePlots(device).map(plot => this._renderPlot(plot))}
           ${this._notice ? html`<p class="notice" role="status">${this._notice}</p>` : nothing}
         </div>
       </ha-card>`;
@@ -358,6 +510,12 @@ class KebaHeatPumpStatusCard extends LitElement {
     .range, .notice { font-size: 12px; line-height: 1.5; color: var(--secondary-text-color); }
     .message { padding: 24px 8px; text-align: center; font-size: 14px; color: var(--secondary-text-color); }
     .error { color: var(--error-color, #db4437); }
+    .plot + .plot { border-top: 1px solid var(--divider-color); margin-top: 16px; padding-top: 16px; }
+    h3 { margin: 0 0 8px; font-size: 14px; font-weight: 500; }
+    .extra-temperatures { border: 0; padding: 0; margin: 0 0 12px; }
+    .extra-temperatures legend { margin-bottom: 6px; font-size: 12px; color: var(--secondary-text-color); }
+    .extra-temperatures label { display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+    input[type="checkbox"] { accent-color: var(--primary-color); flex-shrink: 0; }
     state-history-charts { display: block; min-width: 0; --chart-max-height: 300px; }
     @media (max-width: 400px) { header { padding: 16px 12px 12px; } .content { padding: 0 12px 12px; } .refresh span { display: none; } }
   `;

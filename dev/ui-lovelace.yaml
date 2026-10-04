@@ -15,24 +15,24 @@ views:
         title: Heat Pump Status
         show_header_toggle: false
         entities:
-          - entity: sensor.keba_heat_pump_modbus_heat_pump_state
+          - entity: sensor.heat_pump_heat_pump_state
             name: State
-          - entity: sensor.keba_heat_pump_modbus_flow_temperature
+          - entity: sensor.heat_pump_flow_temperature
             name: Flow Temperature
-          - entity: sensor.keba_heat_pump_modbus_electrical_power_consumption
+          - entity: sensor.heat_pump_electrical_power_consumption
             name: Power Consumption
-          - entity: sensor.keba_heat_pump_modbus_source_in_temperature
+          - entity: sensor.heat_pump_source_in_temperature
             name: Source In
-          - entity: sensor.keba_heat_pump_modbus_source_out_temperature
+          - entity: sensor.heat_pump_source_out_temperature
             name: Source Out
 
       - type: entities
         title: Hot Water
         show_header_toggle: false
         entities:
-          - entity: sensor.keba_heat_pump_modbus_top_temperature_dhw_tank1
+          - entity: sensor.hot_water_tank_top_temperature
             name: Top Temperature
-          - entity: number.keba_heat_pump_modbus_top_set_temperature_dhw_tank1
+          - entity: number.hot_water_tank_top_set_temperature
             name: Top Set Temperature
-          - entity: select.keba_heat_pump_modbus_operating_mode_dhw_tank1
+          - entity: select.hot_water_tank_operating_mode
             name: Operating Mode
