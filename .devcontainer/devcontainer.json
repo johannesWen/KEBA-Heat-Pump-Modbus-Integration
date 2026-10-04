@@ -1,11 +1,6 @@
 {
-  "name": "Python 3.13 DevContainer",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
-  // This is the default mount behavior for devcontainers:
-  // your local repo is mounted into the container at /workspaces/<repo>
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "name": "KEBA Home Assistant Development",
+  "workspaceFolder": "/workspaces/keba",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -21,6 +16,24 @@
       }
     }
   },
-  "postCreateCommand": "python -m pip install -U pip && if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi",
-  "remoteUser": "vscode"
+  "postCreateCommand": "python -m pip install -r requirements-dev.txt && npm --prefix frontend ci",
+  "remoteUser": "vscode",
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "docker-compose.yml"
+  ],
+  "service": "devcontainer",
+  "runServices": [
+    "devcontainer",
+    "homeassistant",
+    "modbus-simulator"
+  ],
+  "shutdownAction": "stopCompose",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24"
+    }
+  },
+  "postStartCommand": "npm --prefix frontend run build && python dev/bootstrap.py",
+  "waitFor": "postStartCommand"
 }

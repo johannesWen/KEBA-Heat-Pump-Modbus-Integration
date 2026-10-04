@@ -110,6 +110,8 @@ view: schedule
 
 Add **KEBA Heat Pump Status** from the dashboard card picker to plot temperatures for a selected device. The device selector includes the heat pump, system, hot-water tank, buffer tank, and configured heating circuits that have enabled temperature entities. Measured temperatures and absolute setpoints are included; temperature offsets are excluded. Renamed entities and customized device names are supported, and separate installations stay separate.
 
+Heat-pump temperatures use separate plots for **flow, reflux, and setpoint** and **source in and out**. Heating circuits use one plot for **flow and reflux** and a second for their other temperatures. Buffer tanks show **middle and top** by default; enable other recorded temperatures with the **Additional temperatures** checkboxes. These selections persist for the card session, including time-window changes and refreshes.
+
 ```yaml
 type: custom:keba-heat-pump-modbus-status-card
 title: KEBA Temperature History
@@ -160,16 +162,37 @@ Status checks cover device discovery, renamed entities, setpoints, multiple inst
 
 ### Local Home Assistant
 
-A Docker Compose stack is provided for testing the integration together with the bundled card against a simulated Modbus TCP server.
+Reopen this repository in the VS Code dev container. It starts Home Assistant and
+the Modbus simulator, installs the development dependencies, builds both bundled
+Lovelace cards, completes HA onboarding, and configures the KEBA integration with
+all four simulated heating circuits automatically.
+
+Open [the development dashboard](http://localhost:8123/lovelace/keba) and log in
+with username **dev** and password **dev**. The dashboard includes the control
+card, the temperature history card, heat pump status, and hot water controls.
+The first startup can take a few minutes while dependencies are installed.
+
+HA accounts, integration entries, and history persist in the Compose `ha-config`
+volume across restarts and rebuilds. Initialization runs on every dev container
+start and reuses the existing account and integration. To choose other local
+development credentials, set `HA_DEV_USERNAME` and `HA_DEV_PASSWORD` before
+creating the container; keep using those values for the existing volume.
+
+You can also run the same setup outside the dev container:
 
 ```bash
-cd frontend && npm install && npm run build && cd ..
-docker compose up -d
+npm --prefix frontend ci
+npm --prefix frontend run build
+docker compose up -d --build
+python3 dev/bootstrap.py
 ```
 
-Then open [http://localhost:8123](http://localhost:8123). Add the KEBA integration using the simulator host `modbus-simulator` and port `502` (the simulator is reachable at `localhost:5020` from the Docker host for debugging).
-
-The simulator serves plausible default values for all registers so the integration and card can be exercised without real hardware.
+HA connects to `modbus-simulator:502`; the simulator is also reachable at
+`localhost:5020` from the Docker host for debugging. The simulator serves
+plausible default values for all registers so the integration and cards can be
+exercised without real hardware. If the host ports are occupied, set
+`HA_HOST_PORT` and `MODBUS_HOST_PORT`; pass the corresponding HA URL to
+`python3 dev/bootstrap.py --url http://localhost:<HA_HOST_PORT>`.
 
 ## Troubleshooting
 

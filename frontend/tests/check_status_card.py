@@ -137,6 +137,225 @@ class StatusCardTests(unittest.TestCase):
         expect(self.page.locator("state-history-charts")).to_be_attached()
         self.assertEqual(self.history_calls()[-1]["entity_ids"], ["sensor.hot_water", "number.hot_water_target"])
 
+    def test_legend_entity_names_without_device_prefix(self):
+        self.page.evaluate("""() => {
+          window.states['sensor.renamed_flow'].attributes.friendly_name = 'Heat Pump Flow temperature';
+          window.states['sensor.return'].attributes.friendly_name = 'Heat Pump Reflux temperature';
+          window.states['number.target'].attributes.friendly_name = 'Custom setpoint';
+          window.listeners.entity_registry_updated();
+        }""")
+        charts = self.page.locator("state-history-charts")
+        expect(charts).to_be_attached()
+        self.assertEqual(charts.evaluate("node => node.historyData.line[0].data.map(entity => entity.name)"),
+                         ["Flow temperature", "Reflux temperature", "Custom setpoint"])
+        self.page.evaluate("""() => {
+          window.devices.find(device => device.id === 'hp1').name_by_user = 'Basement [HP]';
+          window.states['sensor.renamed_flow'].attributes.friendly_name = 'Basement [HP] Flow temperature';
+          window.states['number.target'].attributes.friendly_name = 'Heat Pumping target';
+          window.listeners.device_registry_updated();
+        }""")
+        expect(self.page.get_by_label("Device", exact=True).locator("option:checked")).to_have_text("Basement [HP]")
+        expect(charts).to_be_attached()
+        self.assertEqual(charts.evaluate("node => node.historyData.line[0].data.map(entity => entity.name)"),
+                         ["Flow temperature", "Reflux temperature", "Heat Pumping target"])
+
+    def test_combined_legend_and_selected_values(self):
+        self.page.evaluate("""async () => {
+          customElements.define('ha-chart-base', class extends HTMLElement {
+            controllers = [];
+            hidden = new Set();
+            onCalls = 0;
+            chart = {on: (type, callback) => { this.onCalls++; this.hideTip = callback; }};
+            updateComplete = Promise.resolve();
+            constructor() { super(); this.attachShadow({mode: 'open'}); }
+            addController(controller) { this.controllers.push(controller); }
+            requestUpdate() {
+              let legend = this.shadowRoot.querySelector('.chart-legend');
+              if (!legend) {
+                legend = document.createElement('div'); legend.className = 'chart-legend';
+                this.shadowRoot.append(legend);
+              }
+              const list = document.createElement('ul');
+              for (const item of this.options.legend.data) {
+                const row = document.createElement('li');
+                const toggle = document.createElement('button');
+                toggle.className = 'legend-toggle'; toggle.textContent = '●';
+                toggle.setAttribute('aria-label', `Toggle ${item.id}`);
+                toggle.setAttribute('aria-pressed', String(!this.hidden.has(item.id)));
+                toggle.onclick = () => {
+                  if (this.hidden.has(item.id)) this.hidden.delete(item.id);
+                  else this.hidden.add(item.id);
+                  this.requestUpdate();
+                };
+                const label = document.createElement('button');
+                label.className = 'label'; label.textContent = item.name;
+                const value = document.createElement('div');
+                value.className = 'value'; value.textContent = item.value;
+                row.append(toggle, label, value); list.append(row);
+              }
+              legend.replaceChildren(list);
+              this.controllers.forEach(controller => controller.hostUpdated());
+            }
+          });
+          customElements.define('state-history-chart-line', class extends HTMLElement {
+            controllers = [];
+            updateComplete = Promise.resolve();
+            addController(controller) { this.controllers.push(controller); }
+          });
+          const charts = card.shadowRoot.querySelector('state-history-charts');
+          charts.style.height = '300px'; charts.attachShadow({mode: 'open'});
+          window.selectedTime = Date.parse('2026-10-20T08:00:00Z');
+          window.nativeLines = ['°C', '°F'].map(unit => {
+            const line = document.createElement('state-history-chart-line'); line.unit = unit;
+            const base = document.createElement('ha-chart-base');
+            line.attachShadow({mode: 'open'}).append(base);
+            base.data = Array.from({length:30}, (_,index) => ({
+              id: `sensor.temperature_${index}`, name: 'Long entity name '.repeat(8),
+              data: index === 29 ? [] : [[selectedTime-1000, 20+index], [selectedTime, 42+index]],
+            }));
+            line.resetOptions = () => {
+              base.options = {grid:{top:15}, legend:{type:'custom', show:true,
+                data:base.data.map(dataset => ({id:dataset.id, name:dataset.name}))},
+                tooltip:{trigger:'axis', formatter:() => 'Native tooltip'}};
+              line.controllers.forEach(controller => controller.hostUpdated());
+            };
+            line.resetOptions(); charts.shadowRoot.append(line); return line;
+          });
+          await card._configureChartLegends();
+          window.inspectTime = (index, time) => nativeLines[index].shadowRoot
+            .querySelector('ha-chart-base').options.tooltip.formatter([
+              {axisValue:time, seriesId:'sensor.temperature_0', value:[time,45]},
+            ]);
+        }""")
+        legends = self.page.get_by_role("group", name="Legend and selected values")
+        expect(legends).to_have_count(2)
+        expect(self.page.locator(".chart-tooltip")).to_have_count(0)
+        expect(legends.nth(0).locator(".value").first).to_have_text("42 °C")
+        expect(legends.nth(0).locator(".value").last).to_have_text("—")
+        self.page.evaluate("inspectTime(0, selectedTime)")
+        expect(legends.nth(0).locator(".value").first).to_have_text("45 °C")
+        expect(legends.nth(0).locator(".value").nth(1)).to_have_text("43 °C")
+        expect(legends.nth(0).locator(".selected-time")).to_contain_text("10:00:00")
+        expect(legends.nth(1).locator(".value").first).to_have_text("42 °F")
+        toggle = legends.nth(0).get_by_role("button", name="Toggle sensor.temperature_0", exact=True)
+        toggle.click()
+        expect(toggle).to_have_attribute("aria-pressed", "false")
+        self.page.evaluate("nativeLines[0].resetOptions()")
+        expect(legends.nth(0).locator(".selected-time")).to_contain_text("10:00:00")
+        expect(legends.nth(0).locator(".value").first).to_have_text("42 °C")
+        expect(toggle).to_have_attribute("aria-pressed", "false")
+        expect(legends.nth(0).locator(".selected-time")).to_have_count(1)
+        self.page.evaluate("inspectTime(0, selectedTime - 1000)")
+        expect(legends.nth(0).locator(".value").first).to_have_text("45 °C")
+        expect(legends.nth(0).locator(".value").nth(1)).to_have_text("21 °C")
+        self.page.evaluate("nativeLines[0].shadowRoot.querySelector('ha-chart-base').hideTip({})")
+        expect(legends.nth(0).locator(".value").first).to_have_text("45 °C")
+        self.page.evaluate("nativeLines[0].shadowRoot.querySelector('ha-chart-base').hideTip({from:'outside'})")
+        expect(legends.nth(0).locator(".value").first).to_have_text("42 °C")
+        expect(legends.nth(0).locator(".value").nth(1)).to_have_text("43 °C")
+        expect(legends.nth(0).locator(".selected-time")).to_contain_text("12:00:00")
+        expect(toggle).to_have_attribute("aria-pressed", "false")
+        self.assertEqual(self.page.evaluate("nativeLines[0].shadowRoot.querySelector('ha-chart-base').onCalls"), 1)
+        self.page.evaluate("""() => {
+          const base = nativeLines[0].shadowRoot.querySelector('ha-chart-base');
+          base.data.forEach((dataset, index) => {
+            if (dataset.data.length) dataset.data.push([Date.parse('2026-10-20T10:00:01Z'), 60+index]);
+          });
+          nativeLines[0].resetOptions();
+        }""")
+        expect(legends.nth(0).locator(".value").first).to_have_text("60 °C")
+        expect(legends.nth(0).locator(".selected-time")).to_contain_text("12:00:01")
+        expect(legends.nth(1).locator(".value").first).to_have_text("42 °F")
+        self.assertTrue(legends.nth(0).evaluate("node => node.scrollHeight > node.clientHeight"))
+        for width, columns in [(280, 1), (420, 2), (700, 2)]:
+            self.page.evaluate("width => card.style.width = `${width}px`", width)
+            self.assertFalse(legends.nth(0).evaluate("node => node.scrollWidth > node.clientWidth + 1"))
+            self.assertEqual(legends.nth(0).locator("ul").evaluate(
+                "node => getComputedStyle(node).gridTemplateColumns.split(/\\s+/).length"), columns)
+        self.assertEqual(self.page.evaluate("nativeLines[0].shadowRoot.querySelector('ha-chart-base').options.grid.top"), 15)
+        self.page.get_by_label("Device", exact=True).select_option("dhw")
+        expect(legends).to_have_count(0)
+
+    def test_grouped_plots_and_optional_buffer_temperatures(self):
+        self.page.evaluate("""() => {
+          const additions = [
+            ['sensor.renamed_source_in', 'hp1', 'source_in_temperature'],
+            ['sensor.renamed_source_out', 'hp1', 'source_out_temperature'],
+            ['sensor.middle', 'buffer', 'temperature_middle_buffer_tank1'],
+            ['sensor.backup', 'buffer', 'temperature_backup_buffer_tank1'],
+            ['number.minimum', 'buffer', 'temperature_min_set_buffer_tank1'],
+            ['number.cool', 'buffer', 'temperature_cool_set_buffer_tank1'],
+            ['number.excess', 'buffer', 'temperature_target_excess_heat_buffer_tank1'],
+            ['sensor.circuit_flow', 'circuit', 'circuit_flow_temperature_circuit_1'],
+            ['sensor.circuit_reflux', 'circuit', 'circuit_reflux_temperature_circuit_1'],
+            ['number.room_target', 'circuit', 'room_set_temperature_circuit_1'],
+            ['number.room_current_target', 'circuit', 'current_set_room_temperature_circuit_1'],
+            ['number.room_reduced', 'circuit', 'room_set_temperature_reduced_circuit_1'],
+          ];
+          additions.forEach(([id, device, key]) => {
+            window.entities.push({entity_id:id, device_id:device,
+              unique_id:`installation_${key}`, platform:'keba_heat_pump_modbus'});
+            window.states[id] = {entity_id:id, state:'30', attributes:{keba_key:key,
+              device_class:'temperature', state_class:'measurement',
+              unit_of_measurement:'°C', friendly_name:key}};
+          });
+          // Grouping also works with registry keys when state metadata is absent.
+          delete window.states['sensor.renamed_source_out'].attributes.keba_key;
+          window.listeners.entity_registry_updated();
+        }""")
+        charts = self.page.locator("state-history-charts")
+        expect(charts).to_have_count(2)
+
+        def plotted_entities():
+            return charts.evaluate_all("nodes => nodes.map(node => node.historyData.line.flatMap(line => line.data.map(entity => entity.entity_id)))")
+
+        self.assertEqual(plotted_entities(), [
+            ['sensor.renamed_flow', 'sensor.return', 'number.target'],
+            ['sensor.renamed_source_out', 'sensor.renamed_source_in'],
+        ])
+        self.assertEqual(set(self.history_calls()[-1]['entity_ids']), {
+            'sensor.renamed_flow', 'sensor.return', 'number.target',
+            'sensor.renamed_source_in', 'sensor.renamed_source_out',
+        })
+        self.assertEqual(charts.evaluate_all("nodes => new Set(nodes.map(node => `${node.startTime.toISOString()}/${node.endTime.toISOString()}`)).size"), 1)
+        expect(self.page.get_by_role('heading', name='Source in and out')).to_be_visible()
+        self.page.evaluate("window.recentOnly = true")
+        self.page.get_by_role('button', name='This month', exact=True).click()
+        expect(charts).to_have_count(2)
+        self.assertTrue(charts.nth(1).evaluate("node => node.historyData.line[0].data.every(entity => entity.statistics.length === 1)"))
+
+        self.page.get_by_label('Device', exact=True).select_option('buffer')
+        expect(charts).to_have_count(1)
+        self.assertEqual(plotted_entities(), [['sensor.middle', 'sensor.buffer']])
+        extras = self.page.get_by_role('group', name='Additional temperatures')
+        expect(extras.get_by_role('checkbox')).to_have_count(4)
+        self.assertEqual(extras.locator('input:checked').count(), 0)
+        before = len(self.history_calls())
+        backup = extras.get_by_role('checkbox', name='temperature_backup_buffer_tank1', exact=True)
+        backup.check()
+        expect(backup).to_be_checked()
+        self.assertIn('sensor.backup', plotted_entities()[0])
+        self.assertEqual(len(self.history_calls()), before)
+        self.page.get_by_role('button', name='Last hour', exact=True).click()
+        expect(charts).to_have_count(1)
+        expect(backup).to_be_checked()
+        self.assertIn('sensor.backup', plotted_entities()[0])
+
+        self.page.get_by_label('Device', exact=True).select_option('circuit')
+        expect(charts).to_have_count(2)
+        self.assertEqual(plotted_entities(), [
+            ['sensor.circuit_flow', 'sensor.circuit_reflux'],
+            ['sensor.room', 'number.room_current_target', 'number.room_target', 'number.room_reduced'],
+        ])
+        self.page.get_by_label('Device', exact=True).select_option('buffer')
+        expect(charts).to_have_count(1)
+        expect(backup).to_be_checked()
+        backup.uncheck()
+        self.assertEqual(plotted_entities(), [['sensor.middle', 'sensor.buffer']])
+        for width in [280, 320, 420]:
+            self.page.evaluate('width => card.style.width = `${width}px`', width)
+            self.assertFalse(self.page.locator('.content').evaluate('node => node.scrollWidth > node.clientWidth + 1'))
+
     def test_presets_use_server_timezone_and_exact_bounds(self):
         for label, start, end in [
             ("Last hour", "2026-10-20T09:00:00.000Z", "2026-10-20T10:00:00.000Z"),
