@@ -8,6 +8,9 @@ views:
       - type: custom:keba-heat-pump-modbus-card
         title: KEBA Heat Pump
 
+      - type: custom:keba-heat-pump-modbus-status-card
+        title: KEBA Temperature History
+
       - type: entities
         title: Heat Pump Status
         show_header_toggle: false
