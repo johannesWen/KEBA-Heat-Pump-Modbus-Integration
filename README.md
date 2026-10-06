@@ -128,6 +128,8 @@ The default **Today so far** runs from midnight to now. **Yesterday** covers the
 
 Home Assistant History must be enabled and the entities must be recorded. For week/month windows, older temperature sensor readings use hourly averages where long-term statistics are available. Detailed recorded history takes precedence over overlapping statistics. Number setpoints show retained recorded history; disabled entities, excluded recordings, and purged setpoints cannot be reconstructed. The card reports when it uses hourly averages or cannot retrieve older statistics. It does not change recorder settings or enable entities.
 
+For every time window, detailed sensor histories with more than 1,000 points are automatically reduced to roughly 1,000 readings before chart rendering. Time buckets retain their first, minimum, maximum, and last recorded readings, preserving peaks and original timestamps. Unavailable gaps and their boundaries are retained and may exceed this target. Number setpoint histories and older hourly statistics remain unchanged. The charts keep their native step lines without interpolation; zooming into reduced sensor histories shows less detail. Full history is still fetched from Home Assistant.
+
 ## Development
 
 ### Build the bundled card

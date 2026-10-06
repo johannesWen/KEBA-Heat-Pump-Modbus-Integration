@@ -74,6 +74,7 @@ window.hass = {
       window.hold = false;
       return await new Promise(resolve => { window.release = resolve; });
     }
+    if (window.recordedHistory) return window.recordedHistory;
     const start = window.recentOnly ? Date.parse(params.end_time) - 86400000 : Date.parse(params.start_time);
     return Object.fromEntries(params.entity_ids.map(id => [id, window.empty ? [] : [
       {s:'30', lu:start/1000}, {s:'unavailable', lc:(start+1000)/1000},
@@ -118,6 +119,123 @@ class StatusCardTests(unittest.TestCase):
     def select_window(self, label):
         self.page.get_by_role("button", name=label, exact=True).click()
         expect(self.page.locator("state-history-charts")).to_be_attached()
+
+    def test_dense_history_preserves_peaks_and_setpoints_in_every_preset(self) -> None:
+        self.page.evaluate("""() => {
+          const callWS = window.hass.callWS;
+          window.hass.callWS = async params => {
+            if (params.type !== 'history/history_during_period') return callWS(params);
+            const start = Date.parse(params.start_time), end = Date.parse(params.end_time);
+            window.denseHistory = Array.from({length:10001}, (_, index) => ({
+              s: String(index % 40 === 7 ? 80 : index % 40 === 23 ? -40 : 20),
+              lu: (start + Math.round((end - start) * index / 10000)) / 1000,
+            }));
+            return Object.fromEntries(params.entity_ids.map(id => [id, denseHistory]));
+          };
+        }""")
+        for label in ["Last hour", "Last 3 hours", "Last 6 hours", "Today so far",
+                      "Yesterday", "This week", "This month"]:
+            with self.subTest(preset=label):
+                self.select_window(label)
+                result = self.page.locator("state-history-charts").evaluate("""node => {
+                  const data = node.historyData.line[0].data;
+                  const states = data.find(entity => entity.entity_id === 'sensor.renamed_flow').states;
+                  const original = denseHistory.map(point => ({state:point.s, last_changed:point.lu*1000}));
+                  const retained = new Set(states.map(point => point.last_changed));
+                  const byTime = new Map(original.map(point => [point.last_changed, point.state]));
+                  return {
+                    count: states.length,
+                    endpoints: JSON.stringify([states[0], states.at(-1)]) ===
+                      JSON.stringify([original[0], original.at(-1)]),
+                    peaks: original.filter((point, index) => index % 40 === 7 || index % 40 === 23)
+                      .every(point => retained.has(point.last_changed)),
+                    bucketEdges: original.filter((point, index) => index % 40 === 0 ||
+                      (index % 40 === 39 && index < 9960)).every(point => retained.has(point.last_changed)),
+                    recorded: states.every(point => byTime.get(point.last_changed) === point.state),
+                    ordered: states.every((point, index) => !index ||
+                      point.last_changed > states[index-1].last_changed),
+                    setpoints: JSON.stringify(data.find(entity => entity.entity_id === 'number.target').states)
+                      === JSON.stringify(original),
+                  };
+                }""")
+                self.assertLessEqual(result.pop("count"), 1000)
+                self.assertTrue(all(result.values()), result)
+
+    def test_resampling_sparse_constant_and_gap_boundaries(self) -> None:
+        for mode in ["sparse", "constant", "gaps", "one_valid"]:
+            with self.subTest(mode=mode):
+                result = self.page.evaluate("""async mode => {
+                  const start = card._range.start.getTime();
+                  const raw = Array.from({length:mode === 'sparse' ? 1000 : 10001}, (_, index) => ({
+                    s:'-5', lu:(start + index * 1000)/1000,
+                  }));
+                  if (mode === 'sparse' || mode === 'gaps') {
+                    raw[0].lu -= 60;
+                    for (let index = 123; index <= 150; index++) raw[index].s = 'unavailable';
+                    for (let index = 321; index <= 345; index++) raw[index].s = '';
+                    raw[raw.length-1].s = 'unknown';
+                  }
+                  if (mode === 'one_valid') raw.forEach((point, index) => {
+                    point.s = index === 5000 ? '-5' : 'unavailable';
+                  });
+                  window.recordedHistory = {'sensor.renamed_flow':raw};
+                  await card._fetchHistory(); await card.updateComplete;
+                  const states = card._history.line[0].data[0].states;
+                  const original = raw.map(point => ({state:point.s, last_changed:point.lu*1000}));
+                  const retained = new Set(states.map(point => point.last_changed));
+                  const required = mode === 'one_valid' ? [0,4999,5000,5001,10000] :
+                    [0,122,123,150,151,320,321,345,346,raw.length-2,raw.length-1];
+                  return {count:states.length, unchanged:JSON.stringify(states) === JSON.stringify(original),
+                    boundaries:required.every(index => retained.has(original[index].last_changed)),
+                    endpoints:states[0].last_changed === original[0].last_changed &&
+                      states.at(-1).last_changed === original.at(-1).last_changed,
+                    values:states.every(point => mode !== 'constant' || point.state === '-5'),
+                  };
+                }""", mode)
+                self.assertTrue(result["endpoints"])
+                if mode == "sparse":
+                    self.assertTrue(result["unchanged"])
+                elif mode == "constant":
+                    self.assertLessEqual(result["count"], 500)
+                    self.assertTrue(result["values"])
+                else:
+                    self.assertTrue(result["boundaries"])
+                    self.assertLessEqual(result["count"], 1012)
+
+    def test_chart_data_reused_until_history_or_buffer_selection_changes(self) -> None:
+        self.page.evaluate("""async () => {
+          window.previousChart = card.shadowRoot.querySelector('state-history-charts');
+          window.previousData = previousChart.historyData;
+          card.hass = {...window.hass}; await card.updateComplete;
+        }""")
+        self.assertTrue(self.page.evaluate("""() => {
+          const chart = card.shadowRoot.querySelector('state-history-charts');
+          return chart === previousChart && chart.historyData === previousData && chart.hass === card.hass;
+        }"""))
+        self.page.get_by_role("button", name="Refresh history").click()
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.assertTrue(self.page.evaluate(
+            "card.shadowRoot.querySelector('state-history-charts').historyData !== previousData"))
+        self.page.evaluate("""() => {
+          window.entities.push({entity_id:'sensor.backup', device_id:'buffer',
+            unique_id:'temperature_backup_buffer_tank1', platform:'keba_heat_pump_modbus'});
+          window.states['sensor.backup'] = {entity_id:'sensor.backup', state:'30', attributes:{
+            keba_key:'temperature_backup_buffer_tank1', device_class:'temperature',
+            unit_of_measurement:'°C', friendly_name:'Backup temperature'}};
+          window.listeners.entity_registry_updated();
+        }""")
+        self.page.get_by_label("Device", exact=True).select_option("buffer")
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.page.evaluate("window.previousData = card.shadowRoot.querySelector('state-history-charts').historyData")
+        before = len(self.history_calls())
+        self.page.get_by_role("checkbox", name="Backup temperature", exact=True).check()
+        result = self.page.locator("state-history-charts").evaluate("""node => ({
+          changed:node.historyData !== previousData,
+          ids:node.historyData.line.flatMap(group => group.data.map(entity => entity.entity_id)),
+        })""")
+        self.assertTrue(result["changed"])
+        self.assertIn("sensor.backup", result["ids"])
+        self.assertEqual(len(self.history_calls()), before)
 
     def test_discovery_and_chart_contract(self):
         expect(self.page.get_by_label("Device", exact=True)).to_have_value("hp1")
