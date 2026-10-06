@@ -113,6 +113,38 @@ async function loadRegistry(hass) {
 const errorMessage = error => error?.message || error?.code || String(error);
 const numeric = state => typeof state === 'string' && state.trim() !== '' && Number.isFinite(Number(state));
 
+function resampleStates(states, range) {
+  if (states.length <= 1000) return states;
+  const start = range.start.getTime();
+  const interval = (range.end.getTime() - start) / 250;
+  const buckets = new Array(250);
+  const keep = new Set([0, states.length - 1]);
+  let previousNumeric;
+  states.forEach((point, index) => {
+    const isNumeric = numeric(point.state);
+    if (index && isNumeric !== previousNumeric) {
+      keep.add(index - 1);
+      keep.add(index);
+    }
+    previousNumeric = isNumeric;
+    if (!isNumeric) return;
+    const key = Math.max(0, Math.min(249, Math.floor((point.last_changed - start) / interval)));
+    const bucket = buckets[key];
+    if (!bucket) {
+      buckets[key] = { first: index, min: index, max: index, last: index };
+      return;
+    }
+    if (Number(point.state) < Number(states[bucket.min].state)) bucket.min = index;
+    if (Number(point.state) > Number(states[bucket.max].state)) bucket.max = index;
+    bucket.last = index;
+  });
+  for (const bucket of buckets) {
+    if (bucket) for (const index of Object.values(bucket)) keep.add(index);
+  }
+  // ponytail: gap boundaries can exceed 1,000 points; chunk processing if gap-heavy histories still block rendering.
+  return states.filter((point, index) => keep.has(index));
+}
+
 class KebaHeatPumpStatusCard extends LitElement {
   static properties = {
     hass: { attribute: false }, config: { attribute: false },
@@ -129,6 +161,7 @@ class KebaHeatPumpStatusCard extends LitElement {
     this._discoveryRequest = 0;
     this._unsubscribers = [];
     this._enabledBufferEntities = new Set();
+    this._plotHistory = new Map();
     this._onReady = () => this._loadDevices();
   }
 
@@ -356,6 +389,7 @@ class KebaHeatPumpStatusCard extends LitElement {
     const request = ++this._request;
     const device = this._devices.find(item => item.id === this._deviceId);
     this._history = null;
+    this._plotHistory.clear();
     this._notice = '';
     this._error = '';
     this._loading = false;
@@ -412,8 +446,11 @@ class KebaHeatPumpStatusCard extends LitElement {
             .map(point => ({ state: String(point.mean), last_changed: point.end }));
           usedStatistics ||= older.length > 0;
           return { entity_id: id, domain: id.split('.')[0],
-            name: this._entityName(id), states, statistics: older };
-        }).filter(entity => [...entity.states, ...entity.statistics].some(point => numeric(point.state))),
+            name: this._entityName(id),
+            states: id.startsWith('sensor.') ? resampleStates(states, range) : states,
+            statistics: older };
+        }).filter(entity => entity.states.some(point => numeric(point.state)) ||
+          entity.statistics.some(point => numeric(point.state))),
       })).filter(group => group.data.length);
       this._history = { line, timeline: [] };
       if (statsResult.error) this._notice = `Older statistics unavailable: ${errorMessage(statsResult.error)}. Showing recorded history.`;
@@ -432,16 +469,22 @@ class KebaHeatPumpStatusCard extends LitElement {
     const entities = new Set(this._enabledBufferEntities);
     if (enabled) entities.add(id);
     else entities.delete(id);
+    this._plotHistory.clear();
     this._enabledBufferEntities = entities;
   }
 
   _renderPlot(plot) {
-    const line = this._history.line.map(group => ({ ...group,
-      identifier: group.data.filter(entity => plot.entities.includes(entity.entity_id))
-        .map(entity => entity.entity_id).join(','),
-      data: group.data.filter(entity => plot.entities.includes(entity.entity_id) &&
-        (!plot.optional?.includes(entity.entity_id) || this._enabledBufferEntities.has(entity.entity_id))),
-    })).filter(group => group.data.length);
+    let history = this._plotHistory.get(plot.title);
+    if (!history) {
+      const line = this._history.line.map(group => ({ ...group,
+        identifier: group.data.filter(entity => plot.entities.includes(entity.entity_id))
+          .map(entity => entity.entity_id).join(','),
+        data: group.data.filter(entity => plot.entities.includes(entity.entity_id) &&
+          (!plot.optional?.includes(entity.entity_id) || this._enabledBufferEntities.has(entity.entity_id))),
+      })).filter(group => group.data.length);
+      history = { line, timeline: [] };
+      this._plotHistory.set(plot.title, history);
+    }
     return html`<section class="plot" aria-label=${plot.title}>
       <h3>${plot.title}</h3>
       ${plot.optional?.length ? html`<fieldset class="extra-temperatures">
@@ -451,7 +494,7 @@ class KebaHeatPumpStatusCard extends LitElement {
           @change=${event => this._toggleBufferEntity(id, event.target.checked)}
         >${this.hass.states[id].attributes.friendly_name || id}</label>`)}
       </fieldset>` : nothing}
-      ${line.length ? html`<state-history-charts .hass=${this.hass} .historyData=${{ line, timeline: [] }}
+      ${history.line.length ? html`<state-history-charts .hass=${this.hass} .historyData=${history}
         .startTime=${this._range.start} .endTime=${this._range.end}
         .showNames=${true} .expandLegend=${true} .fitYData=${true}
       ></state-history-charts>` : html`<p class="message" role="status">No temperature history found for this plot.</p>`}
