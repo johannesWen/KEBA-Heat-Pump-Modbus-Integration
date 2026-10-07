@@ -4,6 +4,7 @@ Run after npm run build:
     uv run --with playwright==1.58.0 python frontend/tests/check_card.py
 """
 from pathlib import Path
+import json
 import unittest
 
 from playwright.sync_api import sync_playwright, expect
@@ -40,8 +41,9 @@ const card = document.createElement('keba-heat-pump-modbus-card');
 window.card = card;
 card.setConfig({ view: 'schedule' });
 const hass = {
-  config: { time_zone: 'Europe/Vienna' },
+  config: { time_zone: 'Europe/Vienna', components: [] },
   states: {},
+  async callWS() { return []; },
   async callService(domain, service, data) {
     window.calls.push({domain, service, data});
     if (window.holdNext) {
@@ -155,10 +157,22 @@ class CardTests(unittest.TestCase):
         editor = self.page.locator("keba-heat-pump-modbus-card-editor")
         expect(editor.get_by_label("Entity prefix")).to_have_count(0)
         expect(editor.get_by_label("Title")).to_have_value("My heat pump")
+        storage_id = self.page.evaluate("window.editedConfig.view_storage_id")
+        self.assertTrue(storage_id)
         editor.get_by_label("Title").fill("Updated title")
-        self.assertEqual(self.page.evaluate("window.editedConfig"), {"view": "schedule", "title": "Updated title"})
+        self.assertEqual(self.page.evaluate("window.editedConfig"), {"view": "schedule", "title": "Updated title", "view_storage_id": storage_id})
         editor.get_by_role("button", name="Settings", exact=True).click()
-        self.assertEqual(self.page.evaluate("window.editedConfig"), {"view": "settings", "title": "Updated title"})
+        self.assertEqual(self.page.evaluate("window.editedConfig"), {"view": "settings", "title": "Updated title", "view_storage_id": storage_id})
+        self.page.evaluate("""() => {
+          const editor = document.querySelector('keba-heat-pump-modbus-card-editor');
+          const config = {...window.editedConfig};
+          delete config.view_storage_id;
+          editor.setConfig(config);
+          window.generatedId = editor.config.view_storage_id;
+          editor.setConfig(config);
+        }""")
+        self.page.wait_for_function("window.editedConfig.view_storage_id === window.generatedId")
+        self.assertNotEqual(self.page.evaluate("window.generatedId"), storage_id)
 
     def test_failed_add_shows_error_and_can_retry(self):
         self.page.evaluate("window.failNext = true")
@@ -168,6 +182,74 @@ class CardTests(unittest.TestCase):
         self.add.click()
         expect(self.page.get_by_role("alert")).to_have_count(0)
         expect(self.page.get_by_role("textbox", name="Name for plan 1")).to_be_visible()
+
+    def test_generated_ids_in_http_and_https(self) -> None:
+        for origin, pattern in [("http://keba.test", r"^[0-9a-f]{32}$"),
+                                ("https://keba.test", r"^[0-9a-f-]{36}$")]:
+            with self.subTest(origin=origin):
+                self.page.route(f"{origin}/card.js", lambda route: route.fulfill(
+                    path=str(BUNDLE), content_type="text/javascript"))
+                self.page.route(f"{origin}/", lambda route: route.fulfill(
+                    body=FIXTURE, content_type="text/html"))
+                self.page.goto(f"{origin}/")
+                expect(self.add).to_be_visible()
+                ids = self.page.evaluate("""() => Array.from({length: 2},
+                  () => card.constructor.getStubConfig().view_storage_id)""")
+                self.assertNotEqual(ids[0], ids[1])
+                for storage_id in ids:
+                    self.assertRegex(storage_id, pattern)
+
+    def test_last_tab_survives_reload_and_card_ids_are_independent(self) -> None:
+        config = self.page.evaluate("card.constructor.getStubConfig()")
+        config["view"] = "schedule"
+        self.page.evaluate("config => card.setConfig(config)", config)
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        config["title"] = "Renamed card"
+        self.page.evaluate("config => card.setConfig(config)", config)
+        expect(self.page.get_by_role("button", name="Settings", exact=True)).to_have_attribute("aria-pressed", "true")
+        self.page.route("http://keba.test/", lambda route: route.fulfill(
+            body=FIXTURE.replace("card.setConfig({ view: 'schedule' });",
+                                 f"card.setConfig({json.dumps(config)});"),
+            content_type="text/html"))
+        self.page.reload()
+        settings = self.page.get_by_role("button", name="Settings", exact=True)
+        expect(settings).to_have_attribute("aria-pressed", "true")
+        self.assertEqual(self.page.evaluate("card.config.view_storage_id"), config["view_storage_id"])
+        self.page.evaluate("""() => {
+          window.otherConfig = {...card.config, view_storage_id:'other-card'};
+          card.setConfig(otherConfig);
+        }""")
+        expect(self.add).to_be_visible()
+        self.page.evaluate("config => card.setConfig(config)", config)
+        expect(settings).to_have_attribute("aria-pressed", "true")
+        self.page.evaluate("card.setConfig({...card.config, view:'status'})")
+        expect(self.page.get_by_role("button", name="Status", exact=True)).to_have_attribute("aria-pressed", "true")
+        self.page.get_by_role("button", name="Schedule", exact=True).click()
+        self.page.reload()
+        expect(self.add).to_be_visible()
+
+    def test_missing_invalid_and_unavailable_view_storage(self) -> None:
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        self.assertEqual(self.page.evaluate("localStorage.length"), 0)
+        self.assertNotIn("view_storage_id", self.page.evaluate("card.config"))
+        self.page.reload()
+        expect(self.add).to_be_visible()
+        self.page.evaluate("""() => {
+          localStorage.setItem('keba_heat_pump_modbus:card-view:invalid', 'removed-view');
+          card.setConfig({view:'schedule', view_storage_id:'invalid'});
+        }""")
+        expect(self.add).to_be_visible()
+        self.page.evaluate("""() => {
+          Storage.prototype.getItem = () => { throw new Error('Storage blocked'); };
+          Storage.prototype.setItem = () => { throw new Error('Storage full'); };
+          card.setConfig({view:'schedule', view_storage_id:'blocked'});
+        }""")
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        expect(self.page.get_by_role("button", name="Settings", exact=True)).to_have_attribute("aria-pressed", "true")
+        self.assertTrue(self.page.evaluate("""() => {
+          try { card.setConfig({time_window:'invalid'}); return false; }
+          catch { return true; }
+        }"""))
 
     def test_weekday_selection_and_daily_default(self):
         self.add.click()

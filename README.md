@@ -52,7 +52,7 @@ A custom Home Assistant integration that polls a KEBA heat pump controller over 
 
 ## Lovelace
 
-This integration ships Lovelace cards for heat pump settings, schedules, and temperature history. Their source lives under [`frontend/`](frontend) and is built into `custom_components/keba_heat_pump_modbus/static/` at release time.
+This integration ships one Lovelace card for heat pump settings, schedules, and temperature history. Its source lives under [`frontend/`](frontend) and is built into `custom_components/keba_heat_pump_modbus/static/` at release time.
 
 Once the integration is set up, the card is **auto-registered** with Home Assistant — no manual Lovelace `resources:` entry is required.
 
@@ -66,14 +66,22 @@ title: KEBA Heat Pump
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `title` | string | `KEBA Heat Pump` | Card title shown in the dashboard. |
-| `view` | string | `settings` | Card view: `settings` or `schedule`. |
+| `view` | string | `settings` | Initial view: `settings`, `schedule`, or `status`. A remembered tab takes precedence when loading the card. |
+| `view_storage_id` | string | Generated in the UI | Stable ID for remembering the last tab in this browser. New cards receive it automatically; the visual editor adds it to existing cards when saved. YAML-only cards without an ID do not remember their tab. |
+| `device_id` | string | Automatic | Initial Status device; choose it in the visual editor. Automatic selects the first available heat pump. |
+| `time_window` | string | `today` | Initial Status preset: `last_hour`, `last_3_hours`, `last_6_hours`, `today`, `yesterday`, `this_week`, or `this_month`. |
 
 The integration defines the entity prefix internally. The card automatically finds integration entities, including renamed entities; no prefix setting is needed.
 
-The card has two views:
+The card has three views:
 
 - **Settings** — the default view with system/heat pump/hot water/heating circuit controls.
 - **Schedule** — define up to 5 time-based plans that switch heating and hot-water operating modes automatically.
+- **Status** — temperature history for a selected device, with time-window presets.
+
+The last selected view is saved locally in the browser and survives dashboard reloads and Home Assistant restarts. Each generated `view_storage_id` keeps a card's preference separate, even after renaming it. Device, time-window, checkbox, and schedule-plan selections remain session-local. Status history refreshes only while that view is open.
+
+When copying a card's YAML, remove `view_storage_id` from the copy and open its visual editor to generate a new ID, then save. Copies retaining the same ID share the remembered tab in that browser. YAML-only cards can set their own unique string ID.
 
 | Settings view | Schedule view |
 |:---:|:---:|
@@ -106,23 +114,21 @@ view: schedule
 
 > **After updating the integration** (via HACS or manually), **restart Home Assistant** before using new card features. The card is served fresh, but the loaded Python code only changes on restart.
 
-### Historical Status card
+### Status view
 
-Add **KEBA Heat Pump Status** from the dashboard card picker to plot temperatures for a selected device. The device selector includes the heat pump, system, hot-water tank, buffer tank, and configured heating circuits that have enabled temperature entities. Measured temperatures and absolute setpoints are included; temperature offsets are excluded. Renamed entities and customized device names are supported, and separate installations stay separate.
+Open **Status** in the **KEBA Heat Pump Modbus** card to plot temperatures for a selected device. The device selector includes the heat pump, system, hot-water tank, buffer tank, and configured heating circuits that have enabled temperature entities. Measured temperatures and absolute setpoints are included; temperature offsets are excluded. Renamed entities and customized device names are supported, and separate installations stay separate.
 
 Heat-pump temperatures use separate plots for **flow, reflux, and setpoint** and **source in and out**. Heating circuits use one plot for **flow and reflux** and a second for their other temperatures. Buffer tanks show **middle and top** by default; enable other recorded temperatures with the **Additional temperatures** checkboxes. These selections persist for the card session, including time-window changes and refreshes.
 
 ```yaml
-type: custom:keba-heat-pump-modbus-status-card
+type: custom:keba-heat-pump-modbus-card
 title: KEBA Temperature History
+view: status
 time_window: today
+view_storage_id: keba-temperature-history
 ```
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `title` | string | `KEBA Heat Pump Status` | Card title. |
-| `device_id` | string | Automatic | Initial Home Assistant registry device; choose it in the visual editor. Automatic selects the first available heat pump. |
-| `time_window` | string | `today` | Initial preset: `last_hour`, `last_3_hours`, `last_6_hours`, `today`, `yesterday`, `this_week`, or `this_month`. |
+The standalone `custom:keba-heat-pump-modbus-status-card` has been removed. Change existing dashboards to `custom:keba-heat-pump-modbus-card` and add `view: status`, retaining `title`, `device_id`, and `time_window`. Open the visual editor and save to add an automatically generated storage ID.
 
 The default **Today so far** runs from midnight to now. **Yesterday** covers the previous complete calendar day, **This week** starts Monday, and **This month** starts on the first day. Calendar boundaries use Home Assistant's configured time zone, including daylight-saving changes. Device and preset changes on the dashboard apply to that card session; the visual editor sets saved defaults. Open-ended windows refresh every minute, and **Refresh** reloads devices and history immediately.
 
@@ -148,7 +154,7 @@ For iterative development with rebuild-on-save:
 npm run watch
 ```
 
-### Check the cards
+### Check the card
 
 After building the card, run the Chromium interaction checks from the repository root:
 
@@ -160,19 +166,31 @@ uv run --with playwright==1.58.0 python frontend/tests/check_status_card.py
 
 These checks simulate Home Assistant states and service responses, without connecting to a heat pump. They cover adding and editing plans, the four-state hour cycle, hot-water controls, legacy plans, failed saves, the plan limit, unavailable entities, and narrow card layouts.
 
-Status checks cover device discovery, renamed entities, setpoints, multiple installations, time zones and daylight-saving boundaries, statistics fallback, errors and retries, stale responses, lifecycle cleanup, the editor, and narrow layouts. To check the real chart renderer, use the development Home Assistant stack below; its dashboard includes the Status card.
+Status checks cover device discovery, renamed entities, setpoints, multiple installations, time zones and daylight-saving boundaries, statistics fallback, errors and retries, stale responses, tab-switch lifecycle cleanup, the combined editor, and narrow layouts. Card checks also cover generated IDs on HTTP/HTTPS and remembered tabs across reloads. To check the real chart renderer, use the development Home Assistant stack below and open the card's Status view.
 
 ### Local Home Assistant
 
 Reopen this repository in the VS Code dev container. It starts Home Assistant and
 the Modbus simulator, installs the development dependencies, builds both bundled
-Lovelace cards, completes HA onboarding, and configures the KEBA integration with
+Lovelace card, completes HA onboarding, and configures the KEBA integration with
 all four simulated heating circuits automatically.
 
 Open [the development dashboard](http://localhost:8123/lovelace/keba) and log in
 with username **dev** and password **dev**. The dashboard includes the control
 card, the temperature history card, heat pump status, and hot water controls.
 The first startup can take a few minutes while dependencies are installed.
+
+If startup on Windows fails with a `\\wsl.localhost\...\wayland-0` mount error,
+open **Preferences: Open User Settings (JSON)** in VS Code and set:
+
+```json
+"dev.containers.mountWaylandSocket": false
+```
+
+Then run **Dev Containers: Rebuild and Reopen in Container**. This is an
+application setting, so it must be in User settings rather than
+`.vscode/settings.json` or `devcontainer.json`. This project uses the HA web UI
+and does not need Wayland GUI forwarding.
 
 HA accounts, integration entries, and history persist in the Compose `ha-config`
 volume across restarts and rebuilds. Initialization runs on every dev container

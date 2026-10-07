@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { live } from 'lit/directives/live.js';
 import { CARD_VERSION, INTEGRATION_DOMAIN } from 'virtual:integration-version';
-import { defineStatusCardElements } from './keba-heat-pump-modbus-status-card.js';
+import { defineStatusViewElements, validateStatusConfig } from './keba-heat-pump-modbus-status-card.js';
 
 const CARD_TAG = 'keba-heat-pump-modbus-card';
 const EDITOR_TAG = 'keba-heat-pump-modbus-card-editor';
@@ -10,7 +10,13 @@ const DEFAULT_VIEW = 'settings';
 const VIEWS = [
   { key: 'settings', label: 'Settings', icon: 'mdi:cog' },
   { key: 'schedule', label: 'Schedule', icon: 'mdi:calendar-clock' },
+  { key: 'status', label: 'Status', icon: 'mdi:chart-line' },
 ];
+
+function createViewStorageId() {
+  return crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)),
+    byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 const SECTIONS = [
   { key: 'system', label: 'System', icon: 'mdi:cog' },
@@ -53,16 +59,35 @@ class KebaHeatPumpModbusCard extends LitElement {
   }
 
   setConfig(config) {
+    validateStatusConfig(config);
+    if (config.view && !VIEWS.some(view => view.key === config.view)) {
+      throw new Error('Unknown card view');
+    }
+    if (config.view_storage_id != null && typeof config.view_storage_id !== 'string') {
+      throw new Error('view_storage_id must be a string');
+    }
+    const previous = this.config;
     this.config = {
       title: 'KEBA Heat Pump',
       view: DEFAULT_VIEW,
       ...config,
     };
     delete this.config.entity_prefix;
-    this._currentView = this.config.view || DEFAULT_VIEW;
+    this._storageKey = this.config.view_storage_id?.trim()
+      ? `${INTEGRATION_DOMAIN}:card-view:${this.config.view_storage_id.trim()}` : null;
+    if (!this._configured || previous.view_storage_id !== this.config.view_storage_id) {
+      let saved;
+      try { if (this._storageKey) saved = localStorage.getItem(this._storageKey); } catch {}
+      this._currentView = VIEWS.some(view => view.key === saved) ? saved : this.config.view || DEFAULT_VIEW;
+    } else if (previous.view !== this.config.view) {
+      this._setView(this.config.view || DEFAULT_VIEW);
+    }
+    this._configured = true;
+    if (this._statusView) this._statusView.setConfig(this.config);
   }
 
   getCardSize() {
+    if (this._currentView === 'status') return this._statusView?.getCardSize() || 7;
     return 10;
   }
 
@@ -71,7 +96,7 @@ class KebaHeatPumpModbusCard extends LitElement {
   }
 
   static getStubConfig() {
-    return { title: 'KEBA Heat Pump', view: DEFAULT_VIEW };
+    return { title: 'KEBA Heat Pump', view: DEFAULT_VIEW, view_storage_id: createViewStorageId() };
   }
 
   static _escapeRegExp(text) {
@@ -450,7 +475,7 @@ class KebaHeatPumpModbusCard extends LitElement {
   _renderViewTabs() {
     const current = this._currentView;
     return html`
-      <div class="view-tabs">
+      <div class="view-tabs" role="group" aria-label="Card view">
         ${VIEWS.map(
           (view) => html`
             <button
@@ -471,8 +496,18 @@ class KebaHeatPumpModbusCard extends LitElement {
   _setView(view) {
     if (this._currentView === view) return;
     this._currentView = view;
+    try { if (this._storageKey) localStorage.setItem(this._storageKey, view); } catch {}
     this._lastError = null;
     this.requestUpdate();
+  }
+
+  _renderStatusView() {
+    if (!this._statusView) {
+      this._statusView = document.createElement('keba-heat-pump-modbus-status-view');
+      this._statusView.setConfig(this.config);
+    }
+    this._statusView.hass = this.hass;
+    return this._statusView;
   }
 
   // ── Settings view ─────────────────────────────────────────
@@ -938,7 +973,8 @@ class KebaHeatPumpModbusCard extends LitElement {
         </div>
         ${this._renderViewTabs()}
         <div class="card-content">
-          ${view === 'schedule' ? this._renderScheduleView() : this._renderSettingsView()}
+          ${view === 'status' ? this._renderStatusView() :
+            view === 'schedule' ? this._renderScheduleView() : this._renderSettingsView()}
         </div>
       </ha-card>
     `;
@@ -1101,6 +1137,7 @@ class KebaHeatPumpModbusCard extends LitElement {
       }
       .view-tab {
         flex: 1;
+        min-width: 0;
         justify-content: center;
         min-height: 44px;
         border-radius: 8px;
@@ -1308,6 +1345,8 @@ class KebaHeatPumpModbusCard extends LitElement {
         .hour-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
       }
       @container (max-width: 350px) {
+        .view-tab { padding: 6px 8px; }
+        .view-tab ha-icon { display: none; }
         .hour-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
         .plan-card { padding: 12px; }
         .plan-modes { grid-template-columns: 1fr; }
@@ -1326,8 +1365,20 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
   }
 
   setConfig(config) {
-    this.config = { ...config };
+    const storageId = config.view_storage_id?.trim();
+    if (storageId) this._generatedStorageId = null;
+    this._needsStorageId = !storageId;
+    this.config = { ...config, view_storage_id: storageId || (this._generatedStorageId ||= createViewStorageId()) };
     delete this.config.entity_prefix;
+  }
+
+  updated() {
+    if (this._needsStorageId && this.isConnected) {
+      this._needsStorageId = false;
+      this.dispatchEvent(new CustomEvent('config-changed', {
+        detail: { config: this.config }, bubbles: true, composed: true,
+      }));
+    }
   }
 
   _valueChanged(ev) {
@@ -1375,7 +1426,7 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
           />
         </div>
         <div class="field">
-          <label>View</label>
+          <label>Initial view</label>
           <div class="view-options">
             ${VIEWS.map(
               (view) => html`
@@ -1389,6 +1440,9 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
             )}
           </div>
         </div>
+        <keba-heat-pump-modbus-status-options
+          .hass=${this.hass} .config=${this.config}
+        ></keba-heat-pump-modbus-status-options>
       </div>
     `;
   }
@@ -1428,6 +1482,10 @@ class KebaHeatPumpModbusCardEditor extends LitElement {
         color: var(--primary-text-color);
         cursor: pointer;
       }
+      button:focus-visible, input:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+      }
       .view-option.active {
         background: var(--primary-color);
         color: var(--text-primary-color, #fff);
@@ -1450,12 +1508,12 @@ function defineCardElements() {
   }
 
   window.customCards = window.customCards || [];
-  defineStatusCardElements();
+  defineStatusViewElements();
   if (!window.customCards.some((card) => card.type === CARD_TAG)) {
     window.customCards.push({
       type: CARD_TAG,
       name: 'KEBA Heat Pump Modbus',
-      description: 'Settings and schedule card for the KEBA Heat Pump Modbus integration',
+      description: 'Settings, schedules and temperature history for the KEBA Heat Pump Modbus integration',
       preview: true,
     });
   }

@@ -1,4 +1,5 @@
-"""Status card browser regressions. Run after npm run build, like check_card.py."""
+"""Combined card Status view browser regressions. Run after npm run build, like check_card.py."""
+import json
 import unittest
 
 from playwright.sync_api import sync_playwright, expect
@@ -10,7 +11,7 @@ FIXTURE = """<!doctype html><html><head><meta charset="utf-8"><style>
 body { font-family: sans-serif; --primary-color: #007b83; --primary-text-color: #202c32;
 --secondary-text-color: #596b75; --card-background-color: white; --divider-color: #d8e0e3; }
 ha-card { display: block; background: var(--card-background-color); }
-keba-heat-pump-modbus-status-card { display: block; width: 420px; }
+keba-heat-pump-modbus-card { display: block; width: 420px; }
 </style></head><body><script type="module">
 import '/card.js';
 window.calls = []; window.listeners = {}; window.readyListeners = new Set();
@@ -82,8 +83,15 @@ window.hass = {
     ]]));
   }
 };
-window.card = document.createElement('keba-heat-pump-modbus-status-card');
-card.setConfig({}); card.hass = window.hass; document.body.append(card);
+window.mountCard = async config => {
+  window.dashboardCard?.remove();
+  window.dashboardCard = document.createElement('keba-heat-pump-modbus-card');
+  dashboardCard.setConfig({view:'status', ...config}); dashboardCard.hass = window.hass;
+  document.body.append(dashboardCard);
+  await dashboardCard.updateComplete;
+  window.card = dashboardCard._statusView;
+};
+await window.mountCard({});
 </script></body></html>"""
 
 
@@ -119,6 +127,60 @@ class StatusCardTests(unittest.TestCase):
     def select_window(self, label):
         self.page.get_by_role("button", name=label, exact=True).click()
         expect(self.page.locator("state-history-charts")).to_be_attached()
+
+    def test_status_is_lazy_and_tab_switches_preserve_session_selections(self) -> None:
+        self.page.evaluate("window.mountCard({view:'settings'})")
+        before = len(self.history_calls())
+        self.page.clock.run_for(60000)
+        self.assertEqual(len(self.history_calls()), before)
+        self.assertEqual(self.page.evaluate("window.readyListeners.size"), 0)
+        self.page.get_by_role("button", name="Status", exact=True).click()
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.page.evaluate("window.card = dashboardCard._statusView")
+        self.page.get_by_label("Device", exact=True).select_option("hp2")
+        self.select_window("Last 6 hours")
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        expect(self.page.locator("state-history-charts")).to_have_count(0)
+        self.assertEqual(self.page.evaluate("window.readyListeners.size"), 0)
+        before = len(self.history_calls())
+        self.page.clock.run_for(60000)
+        self.assertEqual(len(self.history_calls()), before)
+        self.page.evaluate("dashboardCard.setConfig({...dashboardCard.config, title:'Renamed'})")
+        status = self.page.get_by_role("button", name="Status", exact=True)
+        status.focus()
+        status.press("Enter")
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        expect(self.page.get_by_label("Device", exact=True)).to_have_value("hp2")
+        expect(self.page.get_by_role("button", name="Last 6 hours", exact=True)).to_have_attribute("aria-pressed", "true")
+        self.assertTrue(self.page.evaluate("card === dashboardCard._statusView"))
+        self.assertEqual(self.page.locator("ha-card").count(), 1)
+
+        self.page.evaluate("window.hold = true")
+        self.page.get_by_role("button", name="Today so far", exact=True).click()
+        expect(self.page.get_by_text("Loading temperature history…")).to_be_visible()
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        status.click()
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.page.evaluate("window.release({'sensor.second':[{s:'99',lu:1}]})")
+        self.assertEqual(self.page.locator("state-history-charts").evaluate(
+            "node => node.historyData.line[0].data[0].states.at(-1).state"), "31")
+
+    def test_status_tab_survives_reload_without_persisting_selections(self) -> None:
+        config = self.page.evaluate("dashboardCard.constructor.getStubConfig()")
+        self.page.evaluate("config => dashboardCard.setConfig(config)", config)
+        self.page.get_by_role("button", name="Status", exact=True).click()
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.page.get_by_label("Device", exact=True).select_option("dhw")
+        self.select_window("Last 6 hours")
+        self.page.route("http://keba.test/", lambda route: route.fulfill(
+            body=FIXTURE.replace("await window.mountCard({});",
+                                 f"await window.mountCard({json.dumps(config)});"),
+            content_type="text/html"))
+        self.page.reload()
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        expect(self.page.get_by_role("button", name="Status", exact=True)).to_have_attribute("aria-pressed", "true")
+        expect(self.page.get_by_label("Device", exact=True)).to_have_value("hp1")
+        expect(self.page.get_by_role("button", name="Today so far", exact=True)).to_have_attribute("aria-pressed", "true")
 
     def test_dense_history_preserves_peaks_and_setpoints_in_every_preset(self) -> None:
         self.page.evaluate("""() => {
@@ -386,7 +448,7 @@ class StatusCardTests(unittest.TestCase):
         expect(legends.nth(1).locator(".value").first).to_have_text("42 °F")
         self.assertTrue(legends.nth(0).evaluate("node => node.scrollHeight > node.clientHeight"))
         for width, columns in [(280, 1), (420, 2), (700, 2)]:
-            self.page.evaluate("width => card.style.width = `${width}px`", width)
+            self.page.evaluate("width => dashboardCard.style.width = `${width}px`", width)
             self.assertFalse(legends.nth(0).evaluate("node => node.scrollWidth > node.clientWidth + 1"))
             self.assertEqual(legends.nth(0).locator("ul").evaluate(
                 "node => getComputedStyle(node).gridTemplateColumns.split(/\\s+/).length"), columns)
@@ -471,7 +533,7 @@ class StatusCardTests(unittest.TestCase):
         backup.uncheck()
         self.assertEqual(plotted_entities(), [['sensor.middle', 'sensor.buffer']])
         for width in [280, 320, 420]:
-            self.page.evaluate('width => card.style.width = `${width}px`', width)
+            self.page.evaluate('width => dashboardCard.style.width = `${width}px`', width)
             self.assertFalse(self.page.locator('.content').evaluate('node => node.scrollWidth > node.clientWidth + 1'))
 
     def test_presets_use_server_timezone_and_exact_bounds(self):
@@ -595,18 +657,16 @@ class StatusCardTests(unittest.TestCase):
         expect(self.page.locator("state-history-charts")).to_be_attached()
 
     def test_saved_defaults_before_discovery_and_editor_load(self):
-        self.page.evaluate("""() => {
-          card.remove();
-          window.card = document.createElement('keba-heat-pump-modbus-status-card');
-          const config = {device_id:'dhw', time_window:'last_6_hours'};
-          card.setConfig(config); card.hass = window.hass; document.body.append(card);
-          const editor = card.constructor.getConfigElement();
+        self.page.evaluate("""async () => {
+          const config = {view:'status', device_id:'dhw', time_window:'last_6_hours'};
+          await window.mountCard(config);
+          const editor = dashboardCard.constructor.getConfigElement();
           editor.setConfig(config); editor.hass = window.hass; document.body.append(editor);
         }""")
         expect(self.page.locator("state-history-charts")).to_be_attached()
         expect(self.page.get_by_label("Device", exact=True)).to_have_value("dhw")
         expect(self.page.get_by_role("button", name="Last 6 hours", exact=True)).to_have_attribute("aria-pressed", "true")
-        editor = self.page.locator("keba-heat-pump-modbus-status-card-editor")
+        editor = self.page.locator("keba-heat-pump-modbus-card-editor")
         expect(editor.get_by_label("Initial device").locator("option")).to_have_count(7)
         expect(editor.get_by_label("Initial device")).to_have_value("dhw")
         expect(editor.get_by_label("Initial time window")).to_have_value("last_6_hours")
@@ -619,22 +679,19 @@ class StatusCardTests(unittest.TestCase):
         self.page.get_by_role("button", name="Refresh history").click()
         expect(self.page.get_by_text("Selected device unavailable.", exact=True)).to_be_visible()
         expect(self.page.get_by_role("alert")).to_have_count(0)
-        self.page.evaluate("""() => {
-          card.remove(); window.card = document.createElement('keba-heat-pump-modbus-status-card');
-          card.setConfig({}); card.hass = window.hass; document.body.append(card);
-        }""")
+        self.page.evaluate("window.mountCard({})")
         expect(self.page.get_by_text("No KEBA temperature devices available.")).to_be_visible()
         self.assertEqual(self.page.get_by_label("Device", exact=True).locator("option").count(), 1)
 
     def test_late_chart_helpers_and_pending_subscriptions(self):
         # Use a fresh document so the native chart stub has not been registered yet.
         delayed = FIXTURE.replace(
-            "card.setConfig({}); card.hass = window.hass; document.body.append(card);",
+            "await window.mountCard({});",
             """window.installHelpers = window.loadCardHelpers; delete window.loadCardHelpers;
             window.hass.connection.subscribeEvents = (cb, type) => new Promise(resolve => {
               window.pendingSubscriptions ||= []; window.pendingSubscriptions.push({resolve, type});
             });
-            card.setConfig({}); card.hass = window.hass; document.body.append(card);""",
+            await window.mountCard({});""",
         )
         self.page.route("http://keba.test/", lambda route: route.fulfill(body=delayed, content_type="text/html"))
         self.page.reload()
@@ -654,18 +711,23 @@ class StatusCardTests(unittest.TestCase):
         self.assertEqual(len(self.page.evaluate("window.unsubscribed")), 4)
 
     def test_unit_groups_editor_registration_and_narrow_layout(self):
-        self.assertEqual(self.page.evaluate("window.customCards.filter(c => c.type === 'keba-heat-pump-modbus-status-card').length"), 1)
+        self.assertEqual(self.page.evaluate("window.customCards.filter(c => c.type === 'keba-heat-pump-modbus-status-card').length"), 0)
+        self.assertTrue(self.page.evaluate("""() =>
+          !customElements.get('keba-heat-pump-modbus-status-card') &&
+          !customElements.get('keba-heat-pump-modbus-status-card-editor')"""))
+        self.assertEqual(self.page.evaluate("window.customCards.filter(c => c.type === 'keba-heat-pump-modbus-card').length"), 1)
         self.page.evaluate("window.states['sensor.return'].attributes.unit_of_measurement = '°F'; card.hass = {...window.hass}")
         expect(self.page.locator("state-history-charts")).to_be_attached()
         self.assertEqual(self.page.locator("state-history-charts").evaluate("node => node.historyData.line.map(line => line.unit)"), ["°C", "°F"])
         self.page.evaluate("""() => {
-          const editor = card.constructor.getConfigElement(); editor.setConfig({type:'custom:keba-heat-pump-modbus-status-card'});
+          const editor = dashboardCard.constructor.getConfigElement(); editor.setConfig({type:'custom:keba-heat-pump-modbus-card', view:'status'});
           editor.hass = window.hass;
           editor.addEventListener('config-changed', event => { window.editedConfig = event.detail.config; editor.setConfig(event.detail.config); });
           document.body.append(editor);
         }""")
-        editor = self.page.locator("keba-heat-pump-modbus-status-card-editor")
+        editor = self.page.locator("keba-heat-pump-modbus-card-editor")
         expect(editor.get_by_label("Initial device").locator("option")).to_have_count(7)
+        storage_id = self.page.evaluate("window.editedConfig.view_storage_id")
         editor.get_by_label("Title").fill("Temperatures")
         editor.get_by_label("Initial device").select_option("dhw")
         editor.get_by_label("Initial time window").select_option("last_3_hours")
@@ -673,11 +735,14 @@ class StatusCardTests(unittest.TestCase):
         self.assertEqual(config["title"], "Temperatures")
         self.assertEqual(config["device_id"], "dhw")
         self.assertEqual(config["time_window"], "last_3_hours")
-        self.page.evaluate("config => card.setConfig(config)", config)
+        self.assertEqual(config["view_storage_id"], storage_id)
+        self.assertEqual(config["type"], "custom:keba-heat-pump-modbus-card")
+        self.page.evaluate("config => dashboardCard.setConfig(config)", config)
         expect(self.page.get_by_label("Device", exact=True)).to_have_value("dhw")
         for width in [280, 320, 420, 700]:
-            self.page.evaluate("width => card.style.width = `${width}px`", width)
+            self.page.evaluate("width => dashboardCard.style.width = `${width}px`", width)
             self.assertFalse(self.page.locator(".content").evaluate("node => node.scrollWidth > node.clientWidth + 1"))
+            self.assertFalse(self.page.locator(".view-tabs").evaluate("node => node.scrollWidth > node.clientWidth + 1"))
         self.page.evaluate("document.body.style.setProperty('--card-background-color', '#18242b')")
         expect(self.page.get_by_label("Device", exact=True)).to_be_visible()
 
