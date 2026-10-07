@@ -1,13 +1,19 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { INTEGRATION_DOMAIN } from 'virtual:integration-version';
 
-const CARD_TAG = 'keba-heat-pump-modbus-status-card';
-const EDITOR_TAG = `${CARD_TAG}-editor`;
+const VIEW_TAG = 'keba-heat-pump-modbus-status-view';
+const OPTIONS_TAG = 'keba-heat-pump-modbus-status-options';
 const WINDOWS = [
   ['last_hour', 'Last hour'], ['last_3_hours', 'Last 3 hours'],
   ['last_6_hours', 'Last 6 hours'], ['today', 'Today so far'],
   ['yesterday', 'Yesterday'], ['this_week', 'This week'], ['this_month', 'This month'],
 ];
+
+export function validateStatusConfig(config) {
+  if (config.time_window && !WINDOWS.some(([key]) => key === config.time_window)) {
+    throw new Error('Unknown Status time_window');
+  }
+}
 
 function timeRange(preset, timeZone, now = new Date()) {
   const hours = { last_hour: 1, last_3_hours: 3, last_6_hours: 6 }[preset];
@@ -145,7 +151,7 @@ function resampleStates(states, range) {
   return states.filter((point, index) => keep.has(index));
 }
 
-class KebaHeatPumpStatusCard extends LitElement {
+class KebaHeatPumpStatusView extends LitElement {
   static properties = {
     hass: { attribute: false }, config: { attribute: false },
     _devices: { state: true }, _deviceId: { state: true }, _window: { state: true },
@@ -166,16 +172,16 @@ class KebaHeatPumpStatusCard extends LitElement {
   }
 
   setConfig(config) {
-    if (config.time_window && !WINDOWS.some(([key]) => key === config.time_window)) {
-      throw new Error('Unknown Status time_window');
+    validateStatusConfig(config);
+    if (!this.config || this.config.device_id !== config.device_id) {
+      this._deviceId = config.device_id || null;
     }
-    this.config = { title: 'KEBA Heat Pump Status', ...config };
-    this._deviceId = config.device_id || null;
-    this._window = config.time_window || 'today';
+    if (!this.config || this.config.time_window !== config.time_window) {
+      this._window = config.time_window || 'today';
+    }
+    this.config = { ...config };
   }
 
-  static getStubConfig() { return { type: `custom:${CARD_TAG}`, time_window: 'today' }; }
-  static getConfigElement() { return document.createElement(EDITOR_TAG); }
   getCardSize() {
     const device = this._devices.find(item => item.id === this._deviceId);
     return 7 + Math.max(0, (device ? temperaturePlots(device).length : 1) - 1) * 4;
@@ -508,8 +514,7 @@ class KebaHeatPumpStatusCard extends LitElement {
       timeZone: this.hass.config.time_zone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     }).format(date);
     return html`
-      <ha-card>
-        <header><div><p class="eyebrow">Temperature history</p><h2>${this.config.title}</h2></div>
+        <header><h2>Temperature history</h2>
           <button class="refresh" aria-label="Refresh history" @click=${() => this._loadDevices()}>
             <ha-icon icon="mdi:refresh"></ha-icon><span>Refresh</span>
           </button>
@@ -532,15 +537,14 @@ class KebaHeatPumpStatusCard extends LitElement {
             temperaturePlots(device).map(plot => this._renderPlot(plot))}
           ${this._notice ? html`<p class="notice" role="status">${this._notice}</p>` : nothing}
         </div>
-      </ha-card>`;
+      `;
   }
 
   static styles = css`
     :host { display: block; color: var(--primary-text-color); }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 20px 12px; }
-    h2 { margin: 4px 0 0; font-size: 20px; font-weight: 500; line-height: 1.3; }
-    .eyebrow { margin: 0; color: var(--secondary-text-color); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-    .content { padding: 0 20px 16px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    h2 { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.3; }
+    .content { padding: 0 0 16px; }
     label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--secondary-text-color); }
     select { box-sizing: border-box; width: 100%; padding: 10px; font: inherit; }
     button, select { border: 1px solid var(--divider-color); border-radius: 8px; color: var(--primary-text-color); background: var(--card-background-color); }
@@ -560,14 +564,13 @@ class KebaHeatPumpStatusCard extends LitElement {
     .extra-temperatures label { display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
     input[type="checkbox"] { accent-color: var(--primary-color); flex-shrink: 0; }
     state-history-charts { display: block; min-width: 0; --chart-max-height: 300px; }
-    @media (max-width: 400px) { header { padding: 16px 12px 12px; } .content { padding: 0 12px 12px; } .refresh span { display: none; } }
+    @media (max-width: 400px) { .refresh span { display: none; } }
   `;
 }
 
-class KebaHeatPumpStatusEditor extends LitElement {
+class KebaHeatPumpStatusOptions extends LitElement {
   static properties = { hass: { attribute: false }, config: { attribute: false }, _devices: { state: true }, _error: { state: true } };
   constructor() { super(); this._devices = []; this._request = 0; }
-  setConfig(config) { this.config = { ...config }; }
   connectedCallback() { super.connectedCallback(); if (this.hass) this._load(); }
   disconnectedCallback() { super.disconnectedCallback(); this._request++; this._registry = null; }
   updated(changed) {
@@ -596,8 +599,7 @@ class KebaHeatPumpStatusEditor extends LitElement {
   }
   render() {
     if (!this.config) return nothing;
-    return html`<label>Title<input name="title" .value=${this.config.title ?? ''} @input=${this._change}></label>
-      <label>Initial device<select name="device_id" .value=${this.config.device_id || ''} @change=${this._change}>
+    return html`<label>Initial device<select name="device_id" .value=${this.config.device_id || ''} @change=${this._change}>
         <option value="" .selected=${!this.config.device_id}>Automatic</option>
         ${this.config.device_id && !this._devices.some(device => device.id === this.config.device_id)
           ? html`<option value=${this.config.device_id} .selected=${true}>Selected device unavailable</option>` : nothing}
@@ -616,11 +618,7 @@ class KebaHeatPumpStatusEditor extends LitElement {
   `;
 }
 
-export function defineStatusCardElements() {
-  if (!window.customElements.get(CARD_TAG)) window.customElements.define(CARD_TAG, KebaHeatPumpStatusCard);
-  if (!window.customElements.get(EDITOR_TAG)) window.customElements.define(EDITOR_TAG, KebaHeatPumpStatusEditor);
-  if (!window.customCards.some(card => card.type === CARD_TAG)) window.customCards.push({
-    type: CARD_TAG, name: 'KEBA Heat Pump Status',
-    description: 'Temperature history by device with time presets and older hourly averages', preview: true,
-  });
+export function defineStatusViewElements() {
+  if (!window.customElements.get(VIEW_TAG)) window.customElements.define(VIEW_TAG, KebaHeatPumpStatusView);
+  if (!window.customElements.get(OPTIONS_TAG)) window.customElements.define(OPTIONS_TAG, KebaHeatPumpStatusOptions);
 }
