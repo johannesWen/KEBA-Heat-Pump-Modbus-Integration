@@ -119,6 +119,90 @@ class CardTests(unittest.TestCase):
         self.page.close()
         self.assertEqual(self.errors, [])
 
+    def test_settings_device_locks_default_independence_and_relocking(self) -> None:
+        self.page.evaluate("""() => {
+          const states = {...card.hass.states};
+          for (const [domain,key] of [
+            ['select','operating_mode_heat_pump'], ['number','temperature_top_set_dhw_tank1'],
+            ['select','operating_mode_circuit_1'], ['number','room_set_temperature_circuit_1'],
+            ['select','operating_mode_circuit_2'], ['number','room_set_temperature_circuit_2'],
+          ]) {
+            const entity_id = `${domain}.${key}`;
+            states[entity_id] = {entity_id,state:domain === 'number' ? '20' : 'Auto',
+              attributes:{keba_key:key,options:['Off','Auto'],min:10,max:65,step:0.5}};
+          }
+          card.hass = {...card.hass, states,
+            callService:async (domain,service,data) => { window.calls.push({domain,service,data}); }};
+        }""")
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        expect(self.page.locator(".device-lock")).to_have_count(5)
+        self.assertTrue(self.page.locator(".section-content").evaluate_all(
+            "nodes => nodes.every(node => [...node.querySelectorAll('input,select')].every(input => input.matches(':disabled')))"))
+        system = self.page.get_by_role("group", name="System settings", exact=True)
+        circuit = self.page.get_by_role("group", name="Heating Circuit 1 settings", exact=True)
+        other = self.page.get_by_role("group", name="Heating Circuit 2 settings", exact=True)
+        unlock = self.page.get_by_role("button", name="Unlock System settings", exact=True)
+        self.assertEqual(unlock.locator("ha-icon").evaluate("node => node.icon"), "mdi:lock")
+        self.assertEqual(unlock.evaluate("node => getComputedStyle(node).color"), "rgb(211, 47, 47)")
+        bounds = circuit.locator("input").bounding_box()
+        self.page.mouse.click(bounds["x"] + bounds["width"] / 2, bounds["y"] + bounds["height"] / 2)
+        self.assertEqual(self.page.evaluate("window.calls"), [])
+        unlock.focus()
+        unlock.press("Enter")
+        lock = self.page.get_by_role("button", name="Lock System settings", exact=True)
+        self.assertEqual(lock.locator("ha-icon").evaluate("node => node.icon"), "mdi:lock-open")
+        self.assertEqual(lock.evaluate("node => getComputedStyle(node).color"), "rgb(46, 125, 50)")
+        expect(system.locator("select")).to_be_enabled()
+        expect(circuit.locator("input")).to_be_disabled()
+        system.locator("select").select_option("Full Auto")
+        self.page.get_by_role("button", name="Unlock Heating Circuit 1 settings", exact=True).click()
+        expect(circuit.locator("input")).to_be_enabled()
+        expect(other.locator("input")).to_be_disabled()
+        circuit.locator("input").press("ArrowRight")
+        self.assertEqual(self.page.evaluate("window.calls"), [
+            {"domain":"select", "service":"select_option", "data":{"entity_id":"select.system", "option":"Full Auto"}},
+            {"domain":"number", "service":"set_value", "data":{"entity_id":"number.room_set_temperature_circuit_1", "value":20.5}},
+        ])
+        self.page.evaluate("card.hass = {...card.hass}")
+        expect(circuit.locator("input")).to_be_enabled()
+        self.page.get_by_role("button", name="Lock Heating Circuit 1 settings", exact=True).click()
+        expect(circuit.locator("input")).to_be_disabled()
+        expect(system.locator("select")).to_be_enabled()
+        self.page.get_by_role("button", name="Schedule", exact=True).click()
+        expect(self.add).to_be_enabled()
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        expect(system.locator("select")).to_be_disabled()
+        self.page.get_by_role("button", name="Unlock System settings", exact=True).click()
+        self.page.reload()
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        expect(system.locator("select")).to_be_disabled()
+
+    def test_settings_lock_covers_water_heater_fallback(self) -> None:
+        self.page.evaluate("""() => {
+          const states = {...card.hass.states}; delete states['select.hot_water'];
+          states['water_heater.dhw'] = {entity_id:'water_heater.dhw',state:'Auto',attributes:{
+            keba_key:'operating_mode_dhw_tank1_water_heater',operation_mode:'Auto',
+            operation_list:['Off','Auto'],temperature:45,min_temp:20,max_temp:65,
+          }};
+          card.hass = {...card.hass,states,
+            callService:async (domain,service,data) => { window.calls.push({domain,service,data}); }};
+        }""")
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        group = self.page.get_by_role("group", name="Hot Water settings", exact=True)
+        expect(group.locator("select")).to_be_disabled()
+        expect(group.locator("input")).to_be_disabled()
+        self.page.get_by_role("button", name="Unlock Hot Water settings", exact=True).click()
+        group.locator("select").select_option("Off")
+        group.locator("input").press("ArrowRight")
+        self.assertEqual(self.page.evaluate("window.calls"), [
+            {"domain":"water_heater", "service":"set_operation_mode", "data":{"entity_id":"water_heater.dhw", "operation_mode":"Off"}},
+            {"domain":"water_heater", "service":"set_temperature", "data":{"entity_id":"water_heater.dhw", "temperature":45.5}},
+        ])
+        self.page.get_by_role("button", name="Lock Hot Water settings", exact=True).click()
+        expect(group.locator("select")).to_be_disabled()
+        expect(group.locator("input")).to_be_disabled()
+        self.assertEqual(self.page.evaluate("window.calls.length"), 2)
+
     def test_add_plan_saving_state_and_renamed_entity(self):
         self.page.evaluate("window.holdNext = true")
         self.add.click()

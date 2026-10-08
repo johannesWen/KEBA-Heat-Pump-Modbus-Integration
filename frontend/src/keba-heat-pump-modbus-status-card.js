@@ -15,6 +15,29 @@ export function validateStatusConfig(config) {
   }
 }
 
+function localDateTime(date, timeZone) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function parseLocalDateTime(value, timeZone, current) {
+  const normalized = value.length === 16 ? `${value}:00` : value;
+  if (current && value === localDateTime(current, timeZone).slice(0, 16)) return current;
+  const wallTime = Date.parse(`${normalized}Z`);
+  if (!Number.isFinite(wallTime)) throw new Error('Enter valid start and end times.');
+  // Try both offsets around a DST transition; repeated times use the first occurrence.
+  const candidates = [-86400000, 86400000].map(delta => {
+    const sample = wallTime + delta;
+    return new Date(wallTime - (Date.parse(`${localDateTime(new Date(sample), timeZone)}Z`) - sample));
+  }).sort((a, b) => a - b);
+  const result = candidates.find(date => localDateTime(date, timeZone) === normalized);
+  if (!result) throw new Error('This local time does not exist. Check the date and daylight-saving change.');
+  return result;
+}
+
 function timeRange(preset, timeZone, now = new Date()) {
   const hours = { last_hour: 1, last_3_hours: 3, last_6_hours: 6 }[preset];
   if (hours) return { start: new Date(now.getTime() - hours * 3600000), end: now };
@@ -157,6 +180,7 @@ class KebaHeatPumpStatusView extends LitElement {
     _devices: { state: true }, _deviceId: { state: true }, _window: { state: true },
     _history: { state: true }, _range: { state: true }, _loading: { state: true },
     _error: { state: true }, _notice: { state: true }, _enabledBufferEntities: { state: true },
+    _rangeError: { state: true }, _touchZoom: { state: true }, _zoomed: { state: true },
   };
 
   constructor() {
@@ -168,6 +192,10 @@ class KebaHeatPumpStatusView extends LitElement {
     this._unsubscribers = [];
     this._enabledBufferEntities = new Set();
     this._plotHistory = new Map();
+    this._yRanges = new Map();
+    this._draft = {};
+    this._touchZoom = false;
+    this._zoomed = false;
     this._onReady = () => this._loadDevices();
   }
 
@@ -175,9 +203,16 @@ class KebaHeatPumpStatusView extends LitElement {
     validateStatusConfig(config);
     if (!this.config || this.config.device_id !== config.device_id) {
       this._deviceId = config.device_id || null;
+      this._yRanges.clear();
     }
     if (!this.config || this.config.time_window !== config.time_window) {
       this._window = config.time_window || 'today';
+      this._customRange = null;
+      this._resetRange = null;
+      this._yRanges.clear();
+      this._zoomed = false;
+      this._draft = {};
+      this._rangeError = '';
     }
     this.config = { ...config };
   }
@@ -190,7 +225,7 @@ class KebaHeatPumpStatusView extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this._timer = setInterval(() => {
-      if (this._window !== 'yesterday' && !this._loading) this._fetchHistory();
+      if (!['yesterday', 'custom'].includes(this._window) && !this._loading && !this._drag) this._fetchHistory();
     }, 60000);
     if (this.hass) this._connect();
   }
@@ -198,10 +233,28 @@ class KebaHeatPumpStatusView extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     clearInterval(this._timer);
+    this._cancelDrag();
     this._disconnect();
     this._request++;
     this._discoveryRequest++;
     this._discovering = false;
+  }
+
+  firstUpdated() {
+    this.renderRoot.addEventListener('dblclick', event => {
+      const path = event.composedPath();
+      const base = path.find(node => node.localName === 'ha-chart-base');
+      if (base?.chart && path.includes(base.chart.getDom())) event.stopPropagation();
+    }, true);
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture']) {
+      this.renderRoot.addEventListener(type, event => this._handlePointer(event), true);
+    }
+    // Suppress compatibility mouse/touch events only while our selection owns the gesture.
+    for (const type of ['mousedown', 'mousemove', 'mouseup', 'touchstart', 'touchmove', 'touchend']) {
+      this.renderRoot.addEventListener(type, event => {
+        if (this._drag) event.stopPropagation();
+      }, { capture: true, passive: true });
+    }
   }
 
   _disconnect() {
@@ -309,6 +362,13 @@ class KebaHeatPumpStatusView extends LitElement {
         await chart.updateComplete;
         if (!this.renderRoot.contains(charts)) continue;
         this._legendCharts.add(line);
+        line.hideResetButton = true;
+        const plot = charts.closest('.plot').getAttribute('aria-label');
+        const yRange = this._yRanges.get(`${plot}:${line.unit}`);
+        if (yRange) {
+          line.fitYData = false;
+          [line.minYAxis, line.maxYAxis] = yRange;
+        }
         const timestamp = document.createElement('div');
         timestamp.className = 'selected-time';
         const style = document.createElement('style');
@@ -355,23 +415,27 @@ class KebaHeatPumpStatusView extends LitElement {
         const controller = { hostUpdated: () => {
           if (!chart?.options?.tooltip || chart.options === configuredOptions) return;
           const tooltip = chart.options.tooltip;
-          chart.options = configuredOptions = { ...chart.options, tooltip: {
-            ...tooltip, extraCssText: 'display:none!important;',
-            formatter: params => {
-              if (chart.chart && chart.chart !== tooltipChart) {
-                tooltipChart = chart.chart;
-                tooltipChart.on('hideTip', event => {
-                  // A touch drag ending keeps the native slider active.
-                  if (!event.from) return;
-                  selectedTime = null;
-                  updateLegend();
-                });
-              }
-              selectedTime = params[0].axisValue;
-              updateLegend(params);
-              return nothing;
+          chart.options = configuredOptions = { ...chart.options,
+            dataZoom: [{ type: 'inside', xAxisIndex: 0, zoomOnMouseWheel: false,
+              moveOnMouseWheel: false, moveOnMouseMove: false, preventDefaultMouseMove: false }],
+            tooltip: {
+              ...tooltip, extraCssText: 'display:none!important;',
+              formatter: params => {
+                if (chart.chart && chart.chart !== tooltipChart) {
+                  tooltipChart = chart.chart;
+                  tooltipChart.on('hideTip', event => {
+                    // A touch drag ending keeps the native slider active.
+                    if (!event.from) return;
+                    selectedTime = null;
+                    updateLegend();
+                  });
+                }
+                selectedTime = params[0].axisValue;
+                updateLegend(params);
+                return nothing;
+              },
             },
-          } };
+          };
           updateLegend();
         } };
         line.addController(controller);
@@ -392,6 +456,7 @@ class KebaHeatPumpStatusView extends LitElement {
 
   async _fetchHistory() {
     if (!this.hass || !this.isConnected) return;
+    this._cancelDrag();
     const request = ++this._request;
     const device = this._devices.find(item => item.id === this._deviceId);
     this._history = null;
@@ -404,7 +469,7 @@ class KebaHeatPumpStatusView extends LitElement {
       this._error = 'Home Assistant History is not enabled.';
       return;
     }
-    const range = timeRange(this._window, this.hass.config.time_zone);
+    const range = this._customRange || timeRange(this._window, this.hass.config.time_zone);
     this._range = range;
     this._loading = true;
     try {
@@ -415,7 +480,7 @@ class KebaHeatPumpStatusView extends LitElement {
         groups.get(unit).push(id);
       }
       const params = { start_time: range.start.toISOString(), end_time: range.end.toISOString() };
-      const wantStatistics = ['this_week', 'this_month'].includes(this._window);
+      const wantStatistics = ['this_week', 'this_month', 'custom'].includes(this._window);
       const statistics = async () => {
         if (!wantStatistics) return {};
         const result = {};
@@ -468,8 +533,139 @@ class KebaHeatPumpStatusView extends LitElement {
     }
   }
 
-  _selectDevice(event) { this._deviceId = event.target.value; this._fetchHistory(); }
-  _selectWindow(key) { this._window = key; this._fetchHistory(); }
+  _selectDevice(event) {
+    this._deviceId = event.target.value;
+    this._yRanges.clear();
+    this._fetchHistory();
+  }
+
+  _selectWindow(key) {
+    if (key === 'custom') {
+      this._customRange = this._range;
+    } else this._customRange = null;
+    this._window = key;
+    this._resetRange = null;
+    this._zoomed = false;
+    this._yRanges.clear();
+    this._draft = {};
+    this._rangeError = '';
+    this._fetchHistory();
+  }
+
+  _applyRange(event) {
+    if (!Object.hasOwn(this._draft, event.target.name)) return;
+    try {
+      const fields = this.renderRoot.querySelectorAll('input[type="datetime-local"]');
+      if ([...fields].some(field => !field.validity.valid)) throw new Error('Enter valid start and end times.');
+      const [start, end] = [...fields].map(field =>
+        parseLocalDateTime(field.value, this.hass.config.time_zone, this._range?.[field.name]));
+      if (start >= end) throw new Error('Start time must be before end time.');
+      this._rangeError = '';
+      this._draft = {};
+      if (+start === +this._range?.start && +end === +this._range?.end) return;
+      this._customRange = { start, end };
+      this._window = 'custom';
+      this._resetRange = null;
+      this._zoomed = false;
+      this._yRanges.clear();
+      this._fetchHistory();
+    } catch (error) { this._rangeError = errorMessage(error); }
+  }
+
+  _resetZoom() {
+    this._cancelDrag();
+    if (this._resetRange) {
+      this._window = this._resetRange.window;
+      this._customRange = this._resetRange.custom;
+    }
+    this._resetRange = null;
+    this._zoomed = false;
+    this._yRanges.clear();
+    this._draft = {};
+    this._rangeError = '';
+    this._fetchHistory();
+  }
+
+  _cancelDrag() {
+    const drag = this._drag;
+    if (!drag) return;
+    this._drag = null;
+    drag.overlay.remove();
+    window.removeEventListener('keydown', drag.keydown, true);
+    if (drag.base.hasPointerCapture(drag.pointerId)) drag.base.releasePointerCapture(drag.pointerId);
+  }
+
+  _handlePointer(event) {
+    if (event.type === 'pointerdown') {
+      if (this._drag) { this._cancelDrag(); return; }
+      if (event.button !== 0 || !event.isPrimary || (event.pointerType === 'touch' && !this._touchZoom)) return;
+      const base = event.composedPath().find(node => node.localName === 'ha-chart-base');
+      const chart = base?.chart;
+      // ponytail: native HA chart internals; revisit this hook if HA changes its renderer.
+      if (!chart?.containPixel || !chart.convertFromPixel) return;
+      const rect = chart.getDom().getBoundingClientRect();
+      const point = [event.clientX - rect.left, event.clientY - rect.top];
+      if (!chart.containPixel({ gridIndex: 0 }, point)) return;
+      const options = chart.getOption();
+      const grid = options.grid[0];
+      const size = (value, total) => typeof value === 'string' && value.endsWith('%') ? parseFloat(value) * total / 100 : Number(value || 0);
+      const bounds = [size(grid.left, rect.width), size(grid.top, rect.height),
+        rect.width - size(grid.right, rect.width), rect.height - size(grid.bottom, rect.height)];
+      const overlay = document.createElement('div');
+      overlay.className = 'zoom-selection';
+      base.style.position = 'relative';
+      overlay.style.cssText = 'position:absolute;pointer-events:none;border:1px solid var(--primary-color);background:var(--primary-color);opacity:0.2;z-index:1;';
+      base.shadowRoot.append(overlay);
+      const line = base.getRootNode().host;
+      const plot = event.composedPath().find(node => node.classList?.contains('plot'));
+      this._drag = { base, chart, rect, bounds, point, overlay, line,
+        key: `${plot.getAttribute('aria-label')}:${line.unit}`, pointerId: event.pointerId,
+        keydown: keyEvent => { if (keyEvent.key === 'Escape') { keyEvent.stopPropagation(); this._cancelDrag(); } } };
+      window.addEventListener('keydown', this._drag.keydown, true);
+      base.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const drag = this._drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    event.stopPropagation();
+    if (event.type === 'pointercancel' || event.type === 'lostpointercapture') { this._cancelDrag(); return; }
+    const [left, top, right, bottom] = drag.bounds;
+    const point = [Math.max(left, Math.min(right, event.clientX - drag.rect.left)),
+      Math.max(top, Math.min(bottom, event.clientY - drag.rect.top))];
+    const dx = Math.abs(point[0] - drag.point[0]), dy = Math.abs(point[1] - drag.point[1]);
+    const horizontal = dx >= 8 && dx * 3 >= dy;
+    const vertical = dy >= 8 && dy * 3 >= dx;
+    const from = [horizontal ? Math.min(point[0], drag.point[0]) : left, vertical ? Math.min(point[1], drag.point[1]) : top];
+    const to = [horizontal ? Math.max(point[0], drag.point[0]) : right, vertical ? Math.max(point[1], drag.point[1]) : bottom];
+    Object.assign(drag.overlay.style, { left: `${from[0]}px`, top: `${from[1]}px`,
+      width: `${to[0] - from[0]}px`, height: `${to[1] - from[1]}px`, display: horizontal || vertical ? 'block' : 'none' });
+    if (event.type !== 'pointerup') return;
+    this._cancelDrag();
+    if (!horizontal && !vertical) return;
+    const a = drag.chart.convertFromPixel({ gridIndex: 0 }, from);
+    const b = drag.chart.convertFromPixel({ gridIndex: 0 }, to);
+    if (![...a, ...b].every(Number.isFinite)) return;
+    const start = Math.max(this._range.start.getTime(), Math.round(a[0]));
+    const end = Math.min(this._range.end.getTime(), Math.round(b[0]));
+    if (horizontal && start >= end) return;
+    this._resetRange ||= { window: this._window, custom: this._customRange };
+    this._zoomed = true;
+    if (vertical) {
+      const range = [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+      this._yRanges.set(drag.key, range);
+      drag.line.fitYData = false;
+      [drag.line.minYAxis, drag.line.maxYAxis] = range;
+    }
+    if (horizontal) {
+      this._customRange = { start: new Date(start), end: new Date(end) };
+      this._window = 'custom';
+      this._draft = {};
+      this._rangeError = '';
+      this._fetchHistory();
+    }
+  }
 
   _toggleBufferEntity(id, enabled) {
     const entities = new Set(this._enabledBufferEntities);
@@ -492,7 +688,13 @@ class KebaHeatPumpStatusView extends LitElement {
       this._plotHistory.set(plot.title, history);
     }
     return html`<section class="plot" aria-label=${plot.title}>
-      <h3>${plot.title}</h3>
+      <div class="plot-heading">
+        <h3>${plot.title}</h3>
+        ${history.line.length ? html`<button class="reset-zoom" aria-label="Reset zoom" title="Reset zoom for all plots"
+          ?disabled=${!this._zoomed} @click=${this._resetZoom}>
+          <ha-icon icon="mdi:restore" aria-hidden="true"></ha-icon>
+        </button>` : nothing}
+      </div>
       ${plot.optional?.length ? html`<fieldset class="extra-temperatures">
         <legend>Additional temperatures</legend>
         ${plot.optional.map(id => html`<label><input type="checkbox"
@@ -500,19 +702,19 @@ class KebaHeatPumpStatusView extends LitElement {
           @change=${event => this._toggleBufferEntity(id, event.target.checked)}
         >${this.hass.states[id].attributes.friendly_name || id}</label>`)}
       </fieldset>` : nothing}
-      ${history.line.length ? html`<state-history-charts .hass=${this.hass} .historyData=${history}
-        .startTime=${this._range.start} .endTime=${this._range.end}
-        .showNames=${true} .expandLegend=${true} .fitYData=${true}
-      ></state-history-charts>` : html`<p class="message" role="status">No temperature history found for this plot.</p>`}
+      ${history.line.length ? html`
+        <state-history-charts .hass=${this.hass} .historyData=${history}
+          style=${this._touchZoom ? 'touch-action: none;' : ''}
+          .startTime=${this._range.start} .endTime=${this._range.end}
+          .showNames=${true} .expandLegend=${true} .fitYData=${true}
+        ></state-history-charts>
+      ` : html`<p class="message" role="status">No temperature history found for this plot.</p>`}
     </section>`;
   }
 
   render() {
     if (!this.hass || !this.config) return nothing;
     const device = this._devices.find(item => item.id === this._deviceId);
-    const format = date => new Intl.DateTimeFormat(this.hass.locale?.language || this.hass.language || 'en', {
-      timeZone: this.hass.config.time_zone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    }).format(date);
     return html`
         <header><h2>Temperature history</h2>
           <button class="refresh" aria-label="Refresh history" @click=${() => this._loadDevices()}>
@@ -520,16 +722,35 @@ class KebaHeatPumpStatusView extends LitElement {
           </button>
         </header>
         <div class="content">
-          <label for="device">Device</label>
-          <select id="device" .value=${this._deviceId || ''} @change=${this._selectDevice}>
-            ${!device ? html`<option value=${this._deviceId || ''} .selected=${true}>${this._deviceId ? 'Selected device unavailable' : 'Select a device'}</option>` : nothing}
-            ${this._devices.map(item => html`<option value=${item.id} .selected=${item.id === this._deviceId}>${item.label}</option>`)}
-          </select>
-          <div class="presets" role="group" aria-label="Time window">
-            ${WINDOWS.map(([key, label]) => html`<button aria-pressed=${this._window === key}
-              @click=${() => this._selectWindow(key)}>${label}</button>`)}
+          <div class="selectors">
+            <label class="outlined-field"><span id="device-label">Device</span>
+              <select id="device" aria-labelledby="device-label" .value=${this._deviceId || ''} @change=${this._selectDevice}>
+                ${!device ? html`<option value=${this._deviceId || ''} .selected=${true}>${this._deviceId ? 'Selected device unavailable' : 'Select a device'}</option>` : nothing}
+                ${this._devices.map(item => html`<option value=${item.id} .selected=${item.id === this._deviceId}>${item.label}</option>`)}
+              </select>
+            </label>
+            <label class="outlined-field"><span id="time-window-label">Time window</span>
+              <select id="time-window" aria-labelledby="time-window-label" .value=${this._window} @change=${event => this._selectWindow(event.target.value)}>
+                ${[...WINDOWS, ['custom', 'Custom']].map(([key, label]) => html`
+                  <option value=${key} .selected=${this._window === key}>${label}</option>`)}
+              </select>
+            </label>
           </div>
-          ${device && this._range ? html`<p class="range">${format(this._range.start)} – ${format(this._range.end)} · ${this.hass.config.time_zone}</p>` : nothing}
+          <div class="range-controls">
+            ${['start', 'end'].map(name => html`<label class="outlined-field"><span>${name === 'start' ? 'Start time' : 'End time'}</span>
+              <input type="datetime-local" name=${name} required step="60"
+                aria-describedby="range-error"
+                aria-invalid=${!!this._rangeError}
+                .value=${this._draft[name] ?? (this._range ? localDateTime(this._range[name], this.hass.config.time_zone).slice(0, 16) : '')}
+                @input=${event => { this._draft[name] = event.target.value; }}
+                @blur=${this._applyRange}>
+            </label>`)}
+          </div>
+          <p id="range-error" class="error" role="alert" ?hidden=${!this._rangeError}>${this._rangeError || ''}</p>
+          <button class="touch-zoom" aria-pressed=${this._touchZoom}
+            @click=${() => { this._cancelDrag(); this._touchZoom = !this._touchZoom; }}>
+            <ha-icon icon="mdi:gesture-pinch" aria-hidden="true"></ha-icon>Touch zoom
+          </button>
           ${this._error ? html`<p class="message error" role="alert">${this._error} Use Refresh to retry.</p>` :
             this._loading ? html`<p class="message" role="status">Loading temperature history…</p>` :
             !device ? html`<p class="message" role="status">${this._deviceId ? 'Selected device unavailable.' : 'No KEBA temperature devices available.'}</p>` :
@@ -541,29 +762,50 @@ class KebaHeatPumpStatusView extends LitElement {
   }
 
   static styles = css`
-    :host { display: block; color: var(--primary-text-color); }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-    h2 { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.3; }
+    :host { display: block; color: var(--primary-text-color); font-family: var(--ha-font-family-body, Roboto, sans-serif); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+    h2 { margin: 0; font-size: 20px; font-weight: 500; line-height: 1.4; letter-spacing: 0.15px; }
     .content { padding: 0 0 16px; }
     label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--secondary-text-color); }
-    select { box-sizing: border-box; width: 100%; padding: 10px; font: inherit; }
-    button, select { border: 1px solid var(--divider-color); border-radius: 8px; color: var(--primary-text-color); background: var(--card-background-color); }
-    button { min-height: 36px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; }
-    button:focus-visible, select:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-    button[aria-pressed="true"] { color: var(--text-primary-color, white); background: var(--primary-color); border-color: var(--primary-color); }
+    button, select, input[type="datetime-local"] { color: var(--primary-text-color); background: var(--card-background-color); font: inherit; }
+    button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px;
+      border: 0; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 500; letter-spacing: 0.1px; color: var(--primary-color);
+      transition: background-color 120ms, box-shadow 120ms; }
+    button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary-color) 8%, var(--card-background-color)); }
+    button:active:not(:disabled) { background: color-mix(in srgb, var(--primary-color) 16%, var(--card-background-color)); }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+    button:disabled { cursor: default; opacity: 0.38; }
+    button[aria-pressed="true"] { background: color-mix(in srgb, var(--primary-color) 16%, var(--card-background-color)); }
     .refresh { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-    .refresh ha-icon { --mdc-icon-size: 18px; }
-    .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-    .range, .notice { font-size: 12px; line-height: 1.5; color: var(--secondary-text-color); }
+    ha-icon { --mdc-icon-size: 20px; }
+    .selectors, .range-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 20px 16px; }
+    .range-controls { margin-top: 20px; }
+    .outlined-field { position: relative; min-width: 0; margin: 0; }
+    .outlined-field > span { position: absolute; z-index: 1; top: -7px; left: 12px; padding: 0 4px;
+      background: var(--card-background-color); font-size: 12px; line-height: 14px; letter-spacing: 0.4px; }
+    .outlined-field > select, .outlined-field > input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 56px;
+      padding: 14px 12px; border: 1px solid var(--input-outlined-idle-border-color, var(--divider-color)); border-radius: 4px; font-size: 14px; }
+    .outlined-field:hover > select, .outlined-field:hover > input { border-color: var(--primary-text-color); }
+    .outlined-field:focus-within > span { color: var(--primary-color); }
+    .outlined-field > select:focus, .outlined-field > input:focus { outline: none; border-color: var(--primary-color); box-shadow: inset 0 0 0 1px var(--primary-color); }
+    .outlined-field > input[aria-invalid="true"] { border-color: var(--error-color, #db4437); }
+    .touch-zoom { margin-top: 12px; }
+    @media (hover: hover) and (pointer: fine) { .touch-zoom { display: none; } }
+    @media (any-pointer: coarse) { .touch-zoom { display: inline-flex; } }
+    .notice { font-size: 12px; line-height: 1.5; color: var(--secondary-text-color); }
     .message { padding: 24px 8px; text-align: center; font-size: 14px; color: var(--secondary-text-color); }
     .error { color: var(--error-color, #db4437); }
-    .plot + .plot { border-top: 1px solid var(--divider-color); margin-top: 16px; padding-top: 16px; }
-    h3 { margin: 0 0 8px; font-size: 14px; font-weight: 500; }
+    .plot { padding: 16px 0; }
+    .plot + .plot { border-top: 1px solid var(--divider-color); }
+    .plot-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    h3 { margin: 0; font-size: 16px; font-weight: 500; letter-spacing: 0.15px; }
+    .reset-zoom { flex-shrink: 0; width: 40px; height: 40px; padding: 0; }
     .extra-temperatures { border: 0; padding: 0; margin: 0 0 12px; }
     .extra-temperatures legend { margin-bottom: 6px; font-size: 12px; color: var(--secondary-text-color); }
     .extra-temperatures label { display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
     input[type="checkbox"] { accent-color: var(--primary-color); flex-shrink: 0; }
     state-history-charts { display: block; min-width: 0; --chart-max-height: 300px; }
+    @media (prefers-reduced-motion: reduce) { button { transition: none; } }
     @media (max-width: 400px) { .refresh span { display: none; } }
   `;
 }

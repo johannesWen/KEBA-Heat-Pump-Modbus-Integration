@@ -125,8 +125,274 @@ class StatusCardTests(unittest.TestCase):
         return self.page.evaluate("window.calls.filter(c => c.type === 'history/history_during_period')")
 
     def select_window(self, label):
-        self.page.get_by_role("button", name=label, exact=True).click()
+        self.page.get_by_label("Time window", exact=True).select_option(label=label)
         expect(self.page.locator("state-history-charts")).to_be_attached()
+
+    def apply_range(self, start: str, end: str) -> None:
+        self.page.get_by_label("Start time", exact=True).fill(start)
+        self.page.get_by_label("End time", exact=True).fill(end)
+        self.page.get_by_role("heading", name="Temperature history", exact=True).click()
+
+    def test_date_edits_apply_only_after_leaving_the_input(self) -> None:
+        expect(self.page.get_by_role("button", name="Apply", exact=True)).to_have_count(0)
+        start = self.page.get_by_label("Start time", exact=True)
+        before = len(self.history_calls())
+        start.fill("2026-10-20T03:15")
+        self.assertEqual(len(self.history_calls()), before)
+        start.dispatch_event("change")
+        self.assertEqual(len(self.history_calls()), before)
+        self.page.get_by_label("End time", exact=True).focus()
+        self.assertEqual(len(self.history_calls()), before + 1)
+        self.assertEqual(self.history_calls()[-1]["start_time"], "2026-10-20T01:15:00.000Z")
+        start.focus()
+        self.page.get_by_role("heading", name="Temperature history", exact=True).click()
+        self.assertEqual(len(self.history_calls()), before + 1)
+        start.fill("")
+        self.page.get_by_role("heading", name="Temperature history", exact=True).click()
+        expect(self.page.get_by_role("alert")).to_contain_text("Enter valid start and end times")
+        self.assertEqual(len(self.history_calls()), before + 1)
+        start.fill("2026-10-20T04:00")
+        self.page.get_by_role("heading", name="Temperature history", exact=True).click()
+        expect(self.page.get_by_role("alert")).to_have_count(0)
+        self.assertEqual(len(self.history_calls()), before + 2)
+        reset = self.page.locator(".plot-heading").get_by_role("button", name="Reset zoom", exact=True)
+        expect(reset).to_have_count(1)
+        expect(reset.locator('ha-icon')).to_have_attribute('icon', 'mdi:restore')
+
+    def install_zoom_charts(self) -> None:
+        """Supply native-chart geometry; actual pointer events exercise the card handlers."""
+        self.page.evaluate("""async () => {
+          if (!customElements.get('ha-chart-base')) {
+            customElements.define('ha-chart-base', class extends HTMLElement {
+              updateComplete = Promise.resolve();
+              options = {tooltip:{}, legend:{data:[]}};
+              data = [];
+              addController() {}
+              requestUpdate() {}
+              constructor() { super(); this.attachShadow({mode:'open'}); }
+            });
+          }
+          for (const charts of card.shadowRoot.querySelectorAll('state-history-charts')) {
+            if (charts.shadowRoot) continue;
+            const line = document.createElement('state-history-chart-line');
+            line.unit = charts.historyData.line[0].unit;
+            line.updateComplete = Promise.resolve(); line.addController = () => {};
+            const base = document.createElement('ha-chart-base');
+            base.style.cssText = 'display:block;width:320px;height:220px';
+            base.shadowRoot.innerHTML = '<div style="width:320px;height:220px"></div>';
+            line.attachShadow({mode:'open'}).append(base);
+            charts.attachShadow({mode:'open'}).append(line);
+            base.chart = {
+              on() {}, getDom:() => base,
+              getOption:() => ({grid:[{left:20,right:20,top:10,bottom:10}]}),
+              containPixel:(_, [x,y]) => x >= 20 && x <= 300 && y >= 10 && y <= 210,
+              convertFromPixel:(_, [x,y]) => [
+                +charts.startTime + (x-20)/280 * (charts.endTime-charts.startTime),
+                (line.maxYAxis ?? 100) - (y-10)/200 * ((line.maxYAxis ?? 100)-(line.minYAxis ?? 0)),
+              ],
+            };
+          }
+          await card._configureChartLegends();
+        }""")
+
+    def drag_chart(self, start: tuple[int, int], end: tuple[int, int]) -> None:
+        self.page.locator("ha-chart-base").first.scroll_into_view_if_needed()
+        bounds = self.page.locator("ha-chart-base").first.bounding_box()
+        self.page.mouse.move(bounds["x"] + start[0], bounds["y"] + start[1])
+        self.page.mouse.down()
+        self.page.mouse.move(bounds["x"] + end[0], bounds["y"] + end[1], steps=5)
+        self.page.mouse.up()
+
+    def test_custom_range_validation_timezone_and_lifecycle(self) -> None:
+        expect(self.page.get_by_label("Start time", exact=True)).to_have_value("2026-10-20T00:00")
+        before = len(self.history_calls())
+        self.apply_range("2026-10-20T12:00", "2026-10-20T11:00")
+        expect(self.page.get_by_role("alert")).to_contain_text("Start time must be before")
+        self.assertEqual(len(self.history_calls()), before)
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.apply_range("2026-03-29T02:30", "2026-03-29T05:00")
+        expect(self.page.get_by_role("alert")).to_contain_text("does not exist")
+        self.apply_range("2026-10-25T02:30", "2026-10-25T04:00")
+        self.assertEqual(self.history_calls()[-1]["start_time"], "2026-10-25T00:30:00.000Z")
+        self.assertEqual(self.history_calls()[-1]["end_time"], "2026-10-25T03:00:00.000Z")
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("custom")
+        before = len(self.history_calls())
+        self.page.clock.run_for(60000)
+        self.assertEqual(len(self.history_calls()), before)
+        self.page.get_by_role("button", name="Refresh history").click()
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.assertEqual(self.history_calls()[-1], self.history_calls()[-2])
+        self.page.get_by_role("button", name="Settings", exact=True).click()
+        self.page.get_by_role("button", name="Status", exact=True).click()
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("custom")
+        expect(self.page.get_by_label("Start time", exact=True)).to_have_value("2026-10-25T02:30")
+        self.page.reload()
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("today")
+
+    def test_custom_range_statistics_pending_edits_and_exact_timestamps(self) -> None:
+        self.page.evaluate("window.empty = true")
+        self.apply_range("2025-01-01T00:00", "2025-01-01T04:00")
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.assertTrue(self.page.locator("state-history-charts").evaluate(
+            "node => node.historyData.line[0].data.every(entity => entity.statistics.length > 0)"))
+        self.page.get_by_label("Start time", exact=True).fill("2025-01-01T01:00")
+        self.page.evaluate("card._fetchHistory()")
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        expect(self.page.get_by_label("Start time", exact=True)).to_have_value("2025-01-01T01:00")
+        self.assertEqual(self.history_calls()[-1]["start_time"], "2024-12-31T23:00:00.000Z")
+        self.page.evaluate("""async () => {
+          card._customRange = {start:new Date('2026-10-25T01:30:12.345Z'), end:new Date('2026-10-25T03:00:00Z')};
+          card._draft = {}; await card._fetchHistory();
+        }""")
+        expect(self.page.get_by_label("Start time", exact=True)).to_have_value("2026-10-25T02:30")
+        self.page.get_by_label("End time", exact=True).fill("2026-10-25T05:00")
+        self.page.get_by_role("heading", name="Temperature history", exact=True).click()
+        self.assertEqual(self.history_calls()[-1]["start_time"], "2026-10-25T01:30:12.345Z")
+        self.assertEqual(self.history_calls()[-1]["end_time"], "2026-10-25T04:00:00.000Z")
+
+    def test_drag_zoom_axes_repeated_selection_and_reset(self) -> None:
+        self.install_zoom_charts()
+        original = self.history_calls()[-1]
+        before = len(self.history_calls())
+        self.drag_chart((100, 40), (102, 180))
+        self.assertEqual(len(self.history_calls()), before)
+        self.assertEqual(self.page.locator("state-history-chart-line").evaluate(
+            "node => [node.minYAxis,node.maxYAxis,node.fitYData]"), [15, 85, False])
+        self.drag_chart((90, 100), (230, 102))
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("custom")
+        self.assertEqual(len(self.history_calls()), before + 1)
+        self.assertEqual(self.history_calls()[-1]["start_time"], "2026-10-20T01:00:00.000Z")
+        self.assertEqual(self.history_calls()[-1]["end_time"], "2026-10-20T07:00:00.000Z")
+        self.install_zoom_charts()
+        self.assertEqual(self.page.locator("state-history-chart-line").evaluate(
+            "node => [node.minYAxis,node.maxYAxis]"), [15, 85])
+        self.drag_chart((230, 180), (90, 40))
+        self.assertEqual(len(self.history_calls()), before + 2)
+        self.install_zoom_charts()
+        self.assertEqual(self.page.locator("state-history-chart-line").evaluate(
+            "node => [node.minYAxis,node.maxYAxis]"), [25.5, 74.5])
+        self.page.get_by_role("button", name="Reset zoom", exact=True).click()
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("today")
+        self.assertEqual(self.history_calls()[-1], original)
+        self.install_zoom_charts()
+        self.assertIsNone(self.page.locator("state-history-chart-line").evaluate("node => node.minYAxis"))
+        expect(self.page.get_by_role("button", name="Reset zoom", exact=True)).to_be_disabled()
+
+    def test_drag_zoom_syncs_plots_and_recovers_dense_history(self) -> None:
+        self.page.evaluate("""() => {
+          window.entities.find(e => e.entity_id === 'sensor.second').device_id = 'hp1';
+          window.states['sensor.second'].attributes.keba_key = 'source_in_temperature';
+          const callWS = hass.callWS;
+          hass.callWS = async params => {
+            if (params.type !== 'history/history_during_period') return callWS(params);
+            const start = Date.parse(params.start_time), end = Date.parse(params.end_time);
+            return Object.fromEntries(params.entity_ids.map(id => [id,
+              Array.from({length:Math.floor((end-start)/3000)+1}, (_,i) => ({s:String(i%10),lu:(start+i*3000)/1000}))]));
+          };
+          window.listeners.entity_registry_updated();
+        }""")
+        expect(self.page.locator("state-history-charts")).to_have_count(2)
+        original = self.page.locator("state-history-charts").first.evaluate(
+            "node => node.historyData.line[0].data[0].states.map(point => point.last_changed)")
+        self.install_zoom_charts()
+        self.drag_chart((150, 100), (170, 101))
+        expect(self.page.locator("state-history-charts")).to_have_count(2)
+        ranges = self.page.locator("state-history-charts").evaluate_all(
+            "nodes => nodes.map(node => [node.startTime.toISOString(),node.endTime.toISOString()])")
+        self.assertEqual(ranges[0], ranges[1])
+        detail = self.page.locator("state-history-charts").first.evaluate(
+            "node => node.historyData.line[0].data[0].states.map(point => point.last_changed)")
+        self.assertTrue(set(detail) - set(original))
+
+    def test_drag_cancellation_tiny_moves_and_touch_activation(self) -> None:
+        self.install_zoom_charts()
+        before = len(self.history_calls())
+        self.drag_chart((100, 100), (104, 105))
+        bounds = self.page.locator("ha-chart-base").bounding_box()
+        self.page.mouse.move(bounds['x'] + 100, bounds['y'] + 100)
+        self.page.mouse.down()
+        self.page.mouse.move(bounds['x'] + 200, bounds['y'] + 150)
+        self.page.keyboard.press("Escape")
+        self.page.mouse.up()
+        self.assertEqual(len(self.history_calls()), before)
+        expect(self.page.locator(".zoom-selection")).to_have_count(0)
+        self.page.evaluate("""() => {
+          window.touchDrag = () => {
+            const base = card.shadowRoot.querySelector('state-history-charts').shadowRoot
+              .querySelector('state-history-chart-line').shadowRoot.querySelector('ha-chart-base');
+            const rect = base.getBoundingClientRect();
+            base.setPointerCapture = () => {};
+            for (const [type,x] of [['pointerdown',100],['pointermove',200],['pointerup',200]]) {
+              base.dispatchEvent(new PointerEvent(type, {bubbles:true,composed:true,pointerId:5,
+                pointerType:'touch',isPrimary:true,button:0,clientX:rect.x+x,clientY:rect.y+100}));
+            }
+          }; touchDrag();
+        }""")
+        self.assertEqual(len(self.history_calls()), before)
+        self.page.evaluate("card._touchZoom = true")
+        self.page.evaluate("touchDrag()")
+        self.assertEqual(len(self.history_calls()), before + 1)
+        self.install_zoom_charts()
+        self.page.mouse.move(bounds['x'] + 100, bounds['y'] + 100)
+        self.page.mouse.down()
+        self.page.evaluate("card.remove()")
+        self.page.mouse.up()
+        self.assertFalse(self.page.evaluate("Boolean(card._drag)"))
+
+    def test_custom_zoom_reset_stale_results_and_device_change(self) -> None:
+        self.apply_range("2026-10-19T01:00", "2026-10-19T05:00")
+        original = self.history_calls()[-1]
+        self.install_zoom_charts()
+        self.drag_chart((90, 40), (230, 180))
+        expect(self.page.get_by_role("button", name="Reset zoom", exact=True)).to_be_enabled()
+        self.page.get_by_label("Device", exact=True).select_option("dhw")
+        self.install_zoom_charts()
+        self.assertIsNone(self.page.locator("state-history-chart-line").evaluate("node => node.minYAxis"))
+        self.page.get_by_role("button", name="Reset zoom", exact=True).click()
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.assertEqual(self.history_calls()[-1]["start_time"], original["start_time"])
+        self.assertEqual(self.history_calls()[-1]["end_time"], original["end_time"])
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("custom")
+        self.page.evaluate("window.hold = true")
+        self.apply_range("2026-10-18T01:00", "2026-10-18T05:00")
+        self.apply_range("2026-10-17T01:00", "2026-10-17T05:00")
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.page.evaluate("window.release({'sensor.hot_water':[{s:'99',lu:1}]})")
+        self.assertEqual(self.page.locator("state-history-charts").evaluate(
+            "node => node.historyData.line[0].data[0].states.at(-1).state"), "31")
+        expect(self.page.get_by_label("Start time", exact=True)).to_have_value("2026-10-17T01:00")
+
+    def test_vertical_zoom_isolated_by_unit_and_pointer_cancel(self) -> None:
+        self.page.evaluate("window.states['sensor.return'].attributes.unit_of_measurement = 'F'; card.hass = {...hass}")
+        expect(self.page.locator("state-history-charts")).to_be_attached()
+        self.install_zoom_charts()
+        self.drag_chart((100, 40), (101, 180))
+        self.assertEqual(self.page.evaluate("card._yRanges.size"), 1)
+        self.page.evaluate("""async () => {
+          await card._fetchHistory(); await card.updateComplete;
+        }""")
+        self.install_zoom_charts()
+        self.assertEqual(self.page.locator("state-history-chart-line").evaluate(
+            "node => [node.minYAxis,node.maxYAxis]"), [15,85])
+        # Replacing the chart's unit must not apply another unit's saved bounds.
+        self.page.evaluate("""async () => {
+          window.states['sensor.renamed_flow'].attributes.unit_of_measurement = 'K';
+          await card._fetchHistory(); await card.updateComplete;
+        }""")
+        self.install_zoom_charts()
+        self.assertIsNone(self.page.locator("state-history-chart-line").evaluate("node => node.minYAxis"))
+        self.page.locator("ha-chart-base").scroll_into_view_if_needed()
+        bounds = self.page.locator("ha-chart-base").bounding_box()
+        before = len(self.history_calls())
+        self.page.mouse.move(bounds['x'] + 100, bounds['y'] + 100)
+        self.page.mouse.down()
+        self.page.mouse.move(bounds['x'] + 200, bounds['y'] + 150)
+        self.page.evaluate("""() => card._drag.base.dispatchEvent(new PointerEvent('pointercancel', {
+          bubbles:true,composed:true,pointerId:card._drag.pointerId,
+        }))""")
+        self.page.mouse.up()
+        expect(self.page.locator(".zoom-selection")).to_have_count(0)
+        self.assertEqual(len(self.history_calls()), before)
 
     def test_status_is_lazy_and_tab_switches_preserve_session_selections(self) -> None:
         self.page.evaluate("window.mountCard({view:'settings'})")
@@ -151,12 +417,12 @@ class StatusCardTests(unittest.TestCase):
         status.press("Enter")
         expect(self.page.locator("state-history-charts")).to_be_attached()
         expect(self.page.get_by_label("Device", exact=True)).to_have_value("hp2")
-        expect(self.page.get_by_role("button", name="Last 6 hours", exact=True)).to_have_attribute("aria-pressed", "true")
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("last_6_hours")
         self.assertTrue(self.page.evaluate("card === dashboardCard._statusView"))
         self.assertEqual(self.page.locator("ha-card").count(), 1)
 
         self.page.evaluate("window.hold = true")
-        self.page.get_by_role("button", name="Today so far", exact=True).click()
+        self.page.get_by_label("Time window", exact=True).select_option("today")
         expect(self.page.get_by_text("Loading temperature history…")).to_be_visible()
         self.page.get_by_role("button", name="Settings", exact=True).click()
         status.click()
@@ -180,7 +446,7 @@ class StatusCardTests(unittest.TestCase):
         expect(self.page.locator("state-history-charts")).to_be_attached()
         expect(self.page.get_by_role("button", name="Status", exact=True)).to_have_attribute("aria-pressed", "true")
         expect(self.page.get_by_label("Device", exact=True)).to_have_value("hp1")
-        expect(self.page.get_by_role("button", name="Today so far", exact=True)).to_have_attribute("aria-pressed", "true")
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("today")
 
     def test_dense_history_preserves_peaks_and_setpoints_in_every_preset(self) -> None:
         self.page.evaluate("""() => {
@@ -500,7 +766,7 @@ class StatusCardTests(unittest.TestCase):
         self.assertEqual(charts.evaluate_all("nodes => new Set(nodes.map(node => `${node.startTime.toISOString()}/${node.endTime.toISOString()}`)).size"), 1)
         expect(self.page.get_by_role('heading', name='Source in and out')).to_be_visible()
         self.page.evaluate("window.recentOnly = true")
-        self.page.get_by_role('button', name='This month', exact=True).click()
+        self.page.get_by_label("Time window", exact=True).select_option("this_month")
         expect(charts).to_have_count(2)
         self.assertTrue(charts.nth(1).evaluate("node => node.historyData.line[0].data.every(entity => entity.statistics.length === 1)"))
 
@@ -516,7 +782,7 @@ class StatusCardTests(unittest.TestCase):
         expect(backup).to_be_checked()
         self.assertIn('sensor.backup', plotted_entities()[0])
         self.assertEqual(len(self.history_calls()), before)
-        self.page.get_by_role('button', name='Last hour', exact=True).click()
+        self.page.get_by_label("Time window", exact=True).select_option("last_hour")
         expect(charts).to_have_count(1)
         expect(backup).to_be_checked()
         self.assertIn('sensor.backup', plotted_entities()[0])
@@ -549,7 +815,7 @@ class StatusCardTests(unittest.TestCase):
             self.select_window(label)
             call = self.history_calls()[-1]
             self.assertEqual((call["start_time"], call["end_time"]), (start, end), label)
-            expect(self.page.get_by_role("button", name=label, exact=True)).to_have_attribute("aria-pressed", "true")
+            expect(self.page.get_by_label("Time window", exact=True).locator("option:checked")).to_have_text(label)
 
     def test_dst_days_and_calendar_boundaries(self):
         for now, label, start, end in [
@@ -599,7 +865,7 @@ class StatusCardTests(unittest.TestCase):
         self.select_window("This month")
         expect(self.page.get_by_text("Older statistics unavailable:", exact=False)).to_be_visible()
         self.page.evaluate("window.fail = 'history/history_during_period'")
-        self.page.get_by_role("button", name="Last hour", exact=True).click()
+        self.page.get_by_label("Time window", exact=True).select_option("last_hour")
         expect(self.page.get_by_role("alert")).to_contain_text("Connection lost")
         self.page.evaluate("window.fail = ''")
         self.page.get_by_role("button", name="Refresh history").click()
@@ -608,7 +874,7 @@ class StatusCardTests(unittest.TestCase):
 
     def test_empty_disabled_and_missing_device_states(self):
         self.page.evaluate("window.empty = true")
-        self.page.get_by_role("button", name="Last hour", exact=True).click()
+        self.page.get_by_label("Time window", exact=True).select_option("last_hour")
         expect(self.page.get_by_text("No temperature history found for this period.")).to_be_visible()
         self.page.evaluate("card.setConfig({device_id:'removed'})")
         expect(self.page.get_by_text("Selected device unavailable.", exact=True)).to_be_visible()
@@ -619,7 +885,7 @@ class StatusCardTests(unittest.TestCase):
 
     def test_stale_results_refresh_and_disconnect_cleanup(self):
         self.page.evaluate("window.hold = true")
-        self.page.get_by_role("button", name="Last hour", exact=True).click()
+        self.page.get_by_label("Time window", exact=True).select_option("last_hour")
         expect(self.page.get_by_text("Loading temperature history…")).to_be_visible()
         self.page.get_by_label("Device", exact=True).select_option("hp2")
         expect(self.page.locator("state-history-charts")).to_be_attached()
@@ -665,7 +931,7 @@ class StatusCardTests(unittest.TestCase):
         }""")
         expect(self.page.locator("state-history-charts")).to_be_attached()
         expect(self.page.get_by_label("Device", exact=True)).to_have_value("dhw")
-        expect(self.page.get_by_role("button", name="Last 6 hours", exact=True)).to_have_attribute("aria-pressed", "true")
+        expect(self.page.get_by_label("Time window", exact=True)).to_have_value("last_6_hours")
         editor = self.page.locator("keba-heat-pump-modbus-card-editor")
         expect(editor.get_by_label("Initial device").locator("option")).to_have_count(7)
         expect(editor.get_by_label("Initial device")).to_have_value("dhw")
