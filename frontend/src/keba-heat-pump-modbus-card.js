@@ -44,6 +44,7 @@ class KebaHeatPumpModbusCard extends LitElement {
       _lastError: { state: true },
       _pending: { state: true },
       _selectedPlanId: { state: true },
+      _unlockedSections: { state: true },
     };
   }
 
@@ -56,6 +57,7 @@ class KebaHeatPumpModbusCard extends LitElement {
     this._pending = false;
     this._selectedPlanId = null;
     this._selectAfterAdd = null;
+    this._unlockedSections = new Set();
   }
 
   setConfig(config) {
@@ -67,6 +69,7 @@ class KebaHeatPumpModbusCard extends LitElement {
       throw new Error('view_storage_id must be a string');
     }
     const previous = this.config;
+    this._unlockedSections = new Set();
     this.config = {
       title: 'KEBA Heat Pump',
       view: DEFAULT_VIEW,
@@ -89,6 +92,11 @@ class KebaHeatPumpModbusCard extends LitElement {
   getCardSize() {
     if (this._currentView === 'status') return this._statusView?.getCardSize() || 7;
     return 10;
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._unlockedSections = new Set();
   }
 
   static getConfigElement() {
@@ -238,14 +246,28 @@ class KebaHeatPumpModbusCard extends LitElement {
     });
   }
 
-  _renderSection({ label, icon }, content) {
+  _toggleSectionLock(key) {
+    const unlocked = new Set(this._unlockedSections);
+    if (unlocked.has(key)) unlocked.delete(key);
+    else unlocked.add(key);
+    this._unlockedSections = unlocked;
+  }
+
+  _renderSection({ key, label, icon }, content) {
+    const unlocked = this._unlockedSections.has(key);
     return html`
       <div class="section">
         <div class="section-header">
           <ha-icon .icon=${icon}></ha-icon>
           <span>${label}</span>
+          <button type="button" class="device-lock ${unlocked ? 'unlocked' : ''}"
+            aria-label=${`${unlocked ? 'Lock' : 'Unlock'} ${label} settings`}
+            title=${unlocked ? 'Unlocked — click to lock' : 'Locked — click to unlock'}
+            @click=${() => this._toggleSectionLock(key)}>
+            <ha-icon .icon=${unlocked ? 'mdi:lock-open' : 'mdi:lock'} aria-hidden="true"></ha-icon>
+          </button>
         </div>
-        <div class="section-content">${content}</div>
+        <fieldset class="section-content" aria-label=${`${label} settings`} ?disabled=${!unlocked}>${content}</fieldset>
       </div>
     `;
   }
@@ -458,7 +480,7 @@ class KebaHeatPumpModbusCard extends LitElement {
     if (!hasAny) return nothing;
 
     return this._renderSection(
-      { label: `Heating Circuit ${circuit}`, icon: 'mdi:radiator' },
+      { key: `circuit_${circuit}`, label: `Heating Circuit ${circuit}`, icon: 'mdi:radiator' },
       html`
         ${this._renderSelect('Operating Mode', modeKey)}
         ${this._renderSlider('Room Set Temperature', setTempKey, '°C')}
@@ -495,6 +517,7 @@ class KebaHeatPumpModbusCard extends LitElement {
 
   _setView(view) {
     if (this._currentView === view) return;
+    this._unlockedSections = new Set();
     this._currentView = view;
     try { if (this._storageKey) localStorage.setItem(this._storageKey, view); } catch {}
     this._lastError = null;
@@ -1043,7 +1066,29 @@ class KebaHeatPumpModbusCard extends LitElement {
         display: flex;
         flex-direction: column;
         gap: 12px;
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
       }
+      .device-lock {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        width: 44px;
+        height: 44px;
+        margin-left: auto;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--error-color, #d32f2f);
+        cursor: pointer;
+      }
+      .device-lock.unlocked { color: var(--success-color, #2e7d32); }
+      .device-lock:hover { background: var(--secondary-background-color, #f5f5f5); }
+      .section-content:disabled input, .section-content:disabled select { cursor: not-allowed; }
       .control-row {
         display: flex;
         align-items: center;
