@@ -31,7 +31,7 @@
   "shutdownAction": "stopCompose",
   "features": {
     "ghcr.io/devcontainers/features/node:2": {
-      "version": "24"
+      "version": "26"
     }
   },
   "postStartCommand": "npm --prefix frontend run build && python dev/bootstrap.py",
